@@ -97,10 +97,38 @@ public final class RawFrameCapture: @unchecked Sendable {
         return dispatcher.dispatch(line: line)
     }
 
+    // Debug counters (SIMKIT_RTC_DEBUG): compositor callback rate vs
+    // conversion cost, printed once per second to stderr.
+    private let debugEnabled =
+        ProcessInfo.processInfo.environment["SIMKIT_RTC_DEBUG"] != nil
+    private var dbgWindowStart = DispatchTime.now()
+    private var dbgCallbacks = 0
+    private var dbgConvertNanos: UInt64 = 0
+
     private func handle(_ surface: IOSurface) {
         queue.async { [weak self] in
-            self?.convertAndEmit(surface)
-            self?.armPump()
+            guard let self else { return }
+            let t0 = DispatchTime.now()
+            self.convertAndEmit(surface)
+            if self.debugEnabled {
+                self.dbgCallbacks += 1
+                self.dbgConvertNanos += DispatchTime.now().uptimeNanoseconds - t0.uptimeNanoseconds
+                let elapsed = DispatchTime.now().uptimeNanoseconds
+                    - self.dbgWindowStart.uptimeNanoseconds
+                if elapsed >= 1_000_000_000 {
+                    let secs = Double(elapsed) / 1e9
+                    let rate = Double(self.dbgCallbacks) / secs
+                    let avgMs = Double(self.dbgConvertNanos) / Double(self.dbgCallbacks) / 1e6
+                    FileHandle.standardError.write(Data(String(
+                        format: "[baguette capture] compositor %.1f cb/s, convert avg %.2f ms\n",
+                        rate, avgMs
+                    ).utf8))
+                    self.dbgWindowStart = DispatchTime.now()
+                    self.dbgCallbacks = 0
+                    self.dbgConvertNanos = 0
+                }
+            }
+            self.armPump()
         }
     }
 
