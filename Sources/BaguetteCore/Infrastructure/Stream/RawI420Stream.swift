@@ -108,18 +108,28 @@ final class BGRAToI420Converter {
     /// Returns the raw-frame payload (header + planes) or nil when the
     /// buffer can't be locked/converted.
     func convert(_ pixelBuffer: CVPixelBuffer) -> Data? {
-        guard prepareConversion() else { return nil }
         guard CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly) == kCVReturnSuccess else {
             return nil
         }
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
+        return convert(
+            base: base,
+            rowBytes: CVPixelBufferGetBytesPerRow(pixelBuffer),
+            width: CVPixelBufferGetWidth(pixelBuffer),
+            height: CVPixelBufferGetHeight(pixelBuffer)
+        )
+    }
+
+    /// Pointer-based variant: converts a BGRA buffer the caller has already
+    /// locked (e.g. an IOSurface base address) without any intermediate copy.
+    func convert(base: UnsafeMutableRawPointer?, rowBytes: Int, width: Int, height: Int) -> Data? {
+        guard prepareConversion(), let base else { return nil }
 
         // I420 needs even dimensions; crop a single row/column when odd.
-        let width = CVPixelBufferGetWidth(pixelBuffer) & ~1
-        let height = CVPixelBufferGetHeight(pixelBuffer) & ~1
+        let width = width & ~1
+        let height = height & ~1
         guard width >= 2, height >= 2 else { return nil }
-        let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
 
         let ySize = width * height
         let chromaWidth = width / 2

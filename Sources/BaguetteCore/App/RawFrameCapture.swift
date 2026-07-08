@@ -105,9 +105,24 @@ public final class RawFrameCapture: @unchecked Sendable {
     }
 
     /// Scale + convert a fresh compositor surface, cache the result, emit.
+    /// At scale 1 the conversion reads the IOSurface directly (locked
+    /// read-only) — no intermediate BGRA copy or GPU round trip.
     private func convertAndEmit(_ surface: IOSurface) {
-        guard let pb = scaler.downscale(surface, scale: scale) else { return }
-        guard let payload = converter.convert(pb) else { return }
+        let payload: Data?
+        if scale <= 1 {
+            IOSurfaceLock(surface, .readOnly, nil)
+            payload = converter.convert(
+                base: IOSurfaceGetBaseAddress(surface),
+                rowBytes: IOSurfaceGetBytesPerRow(surface),
+                width: IOSurfaceGetWidth(surface),
+                height: IOSurfaceGetHeight(surface)
+            )
+            IOSurfaceUnlock(surface, .readOnly, nil)
+        } else {
+            guard let pb = scaler.downscale(surface, scale: scale) else { return }
+            payload = converter.convert(pb)
+        }
+        guard let payload else { return }
         // Converter output is [16-byte header][planes]; strip the header —
         // the embedding API carries dimensions natively.
         let headerSize = 16
