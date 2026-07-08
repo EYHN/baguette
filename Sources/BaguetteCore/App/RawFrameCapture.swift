@@ -68,14 +68,17 @@ public final class RawFrameCapture: @unchecked Sendable {
     }
 
     public func stop() {
+        // Stop the screen first so no new frames get enqueued, then flush
+        // the capture queue and clear the callback on it — after this
+        // returns, the host may safely free its callback context.
+        screen?.stop()
+        screen = nil
         queue.sync {
             pump?.cancel()
             pump = nil
             lastPlanes = Data()
+            onFrame = nil
         }
-        screen?.stop()
-        screen = nil
-        onFrame = nil
     }
 
     /// Dispatches one JSON gesture line (same grammar as the stream WS /
