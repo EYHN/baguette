@@ -175,6 +175,15 @@ final class BGRAToI420Converter {
         return ok ? planes : nil
     }
 
+    /// ITU-R BT.601 RGB→YCbCr coefficients. Declared locally because the
+    /// Accelerate global (`kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4`) is a C
+    /// `var`, which Swift 6 rejects as non-concurrency-safe shared state.
+    private static let bt601Matrix = vImage_ARGBToYpCbCrMatrix(
+        R_Yp: 0.299, G_Yp: 0.587, B_Yp: 0.114,
+        R_Cb: -0.1687, G_Cb: -0.3313, B_Cb_R_Cr: 0.5,
+        G_Cr: -0.4187, B_Cr: -0.0813
+    )
+
     private func prepareConversion() -> Bool {
         if conversionReady { return true }
         // Limited-range (video) BT.601, matching what WebRTC stacks assume
@@ -185,8 +194,9 @@ final class BGRAToI420Converter {
             YpMax: 235, YpMin: 16,
             CbCrMax: 240, CbCrMin: 16
         )
+        var matrix = Self.bt601Matrix
         let error = vImageConvert_ARGBToYpCbCr_GenerateConversion(
-            kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4,
+            &matrix,
             &pixelRange,
             &conversion,
             kvImageARGB8888,
