@@ -27,6 +27,9 @@ enum MJPEGEnvelope {
 /// - `0x04` seed — JPEG image used to paint the first frame instantly,
 ///   so consumers don't stare at a blank canvas waiting for the first IDR
 /// - `0x05` metric — UTF-8 JSON sideband with per-frame stream timings
+/// - `0x06` raw frame — uncompressed I420 planes preceded by a 16-byte
+///   big-endian header (u32 width, u32 height, u64 capture unix micros),
+///   used by `StreamFormat.raw`
 ///
 /// The 4-byte big-endian length covers the tag byte plus the payload, so
 /// a parser reads `len` then `len` bytes that start with the tag.
@@ -36,12 +39,14 @@ enum AVCCEnvelope {
     static let deltaTag:       UInt8 = 0x03
     static let seedTag:        UInt8 = 0x04
     static let metricTag:      UInt8 = 0x05
+    static let rawFrameTag:    UInt8 = 0x06
 
     static func description(avcc: Data) -> Data { wrap(tag: descriptionTag, payload: avcc) }
     static func keyframe(avcc: Data) -> Data    { wrap(tag: keyframeTag, payload: avcc) }
     static func delta(avcc: Data) -> Data       { wrap(tag: deltaTag, payload: avcc) }
     static func seed(jpeg: Data) -> Data        { wrap(tag: seedTag, payload: jpeg) }
     static func metric(json: Data) -> Data      { wrap(tag: metricTag, payload: json) }
+    static func rawFrame(payload: Data) -> Data { wrap(tag: rawFrameTag, payload: payload) }
 
     private static func wrap(tag: UInt8, payload: Data) -> Data {
         let length = UInt32(payload.count + 1)

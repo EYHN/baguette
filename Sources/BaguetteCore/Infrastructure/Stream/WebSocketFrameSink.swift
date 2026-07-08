@@ -56,7 +56,9 @@ final class WebSocketFrameSink: FrameSink, @unchecked Sendable {
         defer { lock.unlock() }
         switch format {
         case .mjpeg: return parseMJPEG(chunk)
-        case .avcc:  return parseAVCC(chunk)
+        // Raw shares AVCC's length-prefixed envelope; both peel to
+        // one `[tag][payload]` binary message per frame.
+        case .avcc, .raw: return parseAVCC(chunk)
         }
     }
 

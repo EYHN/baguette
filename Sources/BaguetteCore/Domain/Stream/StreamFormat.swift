@@ -9,6 +9,10 @@ enum StreamFormat: String, Sendable, Equatable {
     /// AVCC framing — H.264 NALs (length-prefixed) preceded by a JPEG seed
     /// for instant first paint before the first IDR arrives.
     case avcc
+    /// Uncompressed planar I420 frames for consumers that run their own
+    /// video encoder (e.g. a LiveKit/WebRTC publisher). No in-process
+    /// H.264 encode — shortest capture-to-consumer path.
+    case raw
 
     /// MJPEG can drop frames with identical pixels — the decoder is
     /// stateless so a missing frame just means "show the last one." AVCC
@@ -23,6 +27,7 @@ enum StreamFormat: String, Sendable, Equatable {
         switch self {
         case .mjpeg: return MJPEGStream(config: config, sink: sink, quality: quality)
         case .avcc:  return AVCCStream(config: config, sink: sink, quality: quality)
+        case .raw:   return RawI420Stream(config: config, sink: sink)
         }
     }
 }
