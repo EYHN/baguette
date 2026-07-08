@@ -186,7 +186,7 @@ final class BGRAToI420Converter {
             CbCrMax: 240, CbCrMin: 16
         )
         let error = vImageConvert_ARGBToYpCbCr_GenerateConversion(
-            kvImage_ARGBToYpCbCrMatrix_ITU_R_601_2,
+            kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4,
             &pixelRange,
             &conversion,
             kvImageARGB8888,
