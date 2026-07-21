@@ -11,6 +11,10 @@ public struct BaguetteCoreHarness: Sendable {
         simulators.listJSON
     }
 
+    public func runtimeProfilesJSON() throws -> String {
+        try runSimctl(["list", "-j", "runtimes"])
+    }
+
     public func boot(udid: String) throws {
         try simulator(udid: udid).boot()
     }
@@ -20,11 +24,11 @@ public struct BaguetteCoreHarness: Sendable {
     }
 
     public func create(name: String, model: String, runtime: String) throws -> String {
-        try runAndCapture("/usr/bin/xcrun", ["simctl", "create", name, model, runtime])
+        try runSimctl(["create", name, model, runtime])
     }
 
     public func delete(udid: String) throws {
-        _ = try runAndCapture("/usr/bin/xcrun", ["simctl", "delete", udid])
+        _ = try runSimctl(["delete", udid])
     }
 
     public func screenshot(udid: String, quality: Double = 0.85, scale: Int = 1) async throws -> Data {
@@ -158,6 +162,15 @@ public struct BaguetteCoreHarness: Sendable {
         return simulator
     }
 
+    private func runSimctl(_ arguments: [String]) throws -> String {
+        var command = ["simctl"]
+        if let deviceSetPath {
+            command += ["--set", deviceSetPath]
+        }
+        command += arguments
+        return try runAndCapture("/usr/bin/xcrun", command)
+    }
+
     private static func defaultChromes() -> any Chromes {
         LiveChromes(
             store: FileSystemChromeStore(),
@@ -269,19 +282,13 @@ private final class LockedCounter: @unchecked Sendable {
 }
 
 private func runAndCapture(_ executable: String, _ arguments: [String]) throws -> String {
-    let process = Process()
-    let stdout = Pipe()
-    let stderr = Pipe()
-    process.executableURL = URL(fileURLWithPath: executable)
-    process.arguments = arguments
-    process.standardOutput = stdout
-    process.standardError = stderr
-    try process.run()
-    process.waitUntilExit()
-    let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    guard process.terminationStatus == 0 else {
-        throw BaguetteCoreError.processFailed(err.isEmpty ? out : err)
+    let result = try HostProcess.capture(
+        executable: URL(fileURLWithPath: executable),
+        arguments: arguments
+    )
+    let output = String(data: result.output, encoding: .utf8) ?? ""
+    guard result.status == 0 else {
+        throw BaguetteCoreError.processFailed(output)
     }
-    return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    return output.trimmingCharacters(in: .whitespacesAndNewlines)
 }
