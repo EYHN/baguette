@@ -11,6 +11,10 @@ public struct BaguetteCoreHarness: Sendable {
         simulators.listJSON
     }
 
+    public func runtimeProfilesJSON() throws -> String {
+        try runSimctl(["list", "-j", "runtimes"])
+    }
+
     public func boot(udid: String) throws {
         try simulator(udid: udid).boot()
     }
@@ -20,11 +24,11 @@ public struct BaguetteCoreHarness: Sendable {
     }
 
     public func create(name: String, model: String, runtime: String) throws -> String {
-        try runAndCapture("/usr/bin/xcrun", ["simctl", "create", name, model, runtime])
+        try runSimctl(["create", name, model, runtime])
     }
 
     public func delete(udid: String) throws {
-        _ = try runAndCapture("/usr/bin/xcrun", ["simctl", "delete", udid])
+        _ = try runSimctl(["delete", udid])
     }
 
     public func screenshot(udid: String, quality: Double = 0.85, scale: Int = 1) async throws -> Data {
@@ -156,6 +160,15 @@ public struct BaguetteCoreHarness: Sendable {
             throw BaguetteCoreError.notFound("Device \(udid) not found")
         }
         return simulator
+    }
+
+    private func runSimctl(_ arguments: [String]) throws -> String {
+        var command = ["simctl"]
+        if let deviceSetPath {
+            command += ["--set", deviceSetPath]
+        }
+        command += arguments
+        return try runAndCapture("/usr/bin/xcrun", command)
     }
 
     private static func defaultChromes() -> any Chromes {
