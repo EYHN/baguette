@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Pure-value coverage for `Bearing` — the compass direction a
 /// `LocationWalk` travels. Unlike `Coordinate`'s latitude/longitude, a

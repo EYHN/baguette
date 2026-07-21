@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Pure-value coverage for `AppBundle` — the thing the user means when
 /// they say "install an app." `AppBundle.at(_:)` is the classification:

@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `rowAction: "run"` — a row that invokes one of its own plugin's
 /// commands when clicked.

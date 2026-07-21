@@ -3,7 +3,7 @@ import Foundation
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("ImageFileCapture")
 struct ImageFileCaptureTests {

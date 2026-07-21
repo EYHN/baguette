@@ -1,6 +1,6 @@
 import IOSurface
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("SeedFilter")
 struct SeedFilterTests {

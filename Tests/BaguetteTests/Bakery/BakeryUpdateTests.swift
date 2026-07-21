@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// One trusted bakery measured against what its remote holds now.
 /// Pure — the network round-trip is the caller's problem, so every

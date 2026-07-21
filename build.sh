@@ -4,11 +4,11 @@ cd "$(dirname "$0")"
 
 # The iOS-Simulator side of the camera feature — see VirtualCamera/.
 # Cross-compiled against the iphonesimulator SDK (fat: arm64 + x86_64),
-# linker-signed adhoc. Staged into Sources/Baguette/Resources/VirtualCamera/
+# linker-signed adhoc. Staged into Sources/BaguetteCore/Resources/VirtualCamera/
 # so SPM bundles it as a `.copy` resource.
 ./VirtualCamera/build.sh
-mkdir -p Sources/Baguette/Resources/VirtualCamera
-cp -f VirtualCamera/VirtualCamera.dylib Sources/Baguette/Resources/VirtualCamera/
+mkdir -p Sources/BaguetteCore/Resources/VirtualCamera
+cp -f VirtualCamera/VirtualCamera.dylib Sources/BaguetteCore/Resources/VirtualCamera/
 
 # Pure-SPM build. Private frameworks resolve through the rpath flags +
 # linkedFramework declarations in Package.swift.

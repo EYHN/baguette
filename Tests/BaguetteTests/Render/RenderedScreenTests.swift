@@ -2,7 +2,7 @@ import Foundation
 import IOSurface
 import Mockable
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("RenderedScreen")
 struct RenderedScreenTests {

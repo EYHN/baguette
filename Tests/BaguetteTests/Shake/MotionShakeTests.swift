@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Domain coverage for `MotionShake` — the value that owns the UIKit
 /// shake notification name and the `simctl spawn notifyutil` argv that

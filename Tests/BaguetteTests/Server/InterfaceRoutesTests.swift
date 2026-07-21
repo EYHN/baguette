@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Handler-level coverage for the interface routes. As with the
 /// status-bar routes, the pure parse + dispatch helpers are tested

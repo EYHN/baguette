@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Phone input keeps the integrated digitizer constant. CarPlay input
 /// derives its HID target from the live connected screen id — never

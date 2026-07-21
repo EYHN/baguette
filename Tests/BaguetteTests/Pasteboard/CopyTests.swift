@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// The `copy` wire verb — the interactive mirror of `Paste`. Where
 /// paste sets the pasteboard then presses Cmd+V, copy presses Cmd+C
