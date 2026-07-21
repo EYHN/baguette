@@ -269,19 +269,13 @@ private final class LockedCounter: @unchecked Sendable {
 }
 
 private func runAndCapture(_ executable: String, _ arguments: [String]) throws -> String {
-    let process = Process()
-    let stdout = Pipe()
-    let stderr = Pipe()
-    process.executableURL = URL(fileURLWithPath: executable)
-    process.arguments = arguments
-    process.standardOutput = stdout
-    process.standardError = stderr
-    try process.run()
-    process.waitUntilExit()
-    let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    guard process.terminationStatus == 0 else {
-        throw BaguetteCoreError.processFailed(err.isEmpty ? out : err)
+    let result = try HostProcess.capture(
+        executable: URL(fileURLWithPath: executable),
+        arguments: arguments
+    )
+    let output = String(data: result.output, encoding: .utf8) ?? ""
+    guard result.status == 0 else {
+        throw BaguetteCoreError.processFailed(output)
     }
-    return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    return output.trimmingCharacters(in: .whitespacesAndNewlines)
 }

@@ -1,70 +1,75 @@
+import Darwin
 import Foundation
 
-/// Production `Subprocess` — wraps a `Foundation.Process` plus a
-/// stdout/stderr `Pipe`. The only Infrastructure code in the logs
-/// path that touches the real OS spawn pipeline. Integration-only
+/// Production `Subprocess` — wraps the small POSIX host-process launcher.
+/// The only Infrastructure code in the logs path that touches the real OS
+/// spawn pipeline. Integration-only
 /// (manually smoke-tested via `baguette logs` against a booted
 /// simulator); the orchestrator's behaviour is unit-covered
 /// against `MockSubprocess`.
 ///
-/// Single-shot — one `run(...)` call per instance. Re-running
-/// would risk leaking the previous Process / Pipe.
+/// Single-shot — one `run(...)` call per instance.
 final class HostSubprocess: Subprocess, @unchecked Sendable {
     private let lock = NSLock()
-    private var process: Process?
-    private var pipe: Pipe?
+    private var pid: pid_t?
+    private var output: FileHandle?
 
     init() {}
 
     deinit {
-        if let process, process.isRunning { process.terminate() }
-        try? pipe?.fileHandleForReading.close()
-        try? pipe?.fileHandleForWriting.close()
+        terminate()
     }
 
     func run(
         executable: URL,
         arguments: [String],
         onBytes: @escaping @Sendable (Data) -> Void,
-        onExit:  @escaping @Sendable (Int32) -> Void
+        onExit: @escaping @Sendable (Int32) -> Void
     ) throws {
-        let pipe = Pipe()
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.standardOutput = pipe
-        process.standardError  = pipe
-        // Detach from any controlling terminal. Without this a
-        // SIGINT handed to the parent (Ctrl-C in `baguette logs`)
-        // would also kill the child via the foreground pgid
-        // before the parent's own SIGTERM handler runs.
-        process.standardInput  = FileHandle.nullDevice
-        process.environment = ProcessInfo.processInfo.environment
-
-        pipe.fileHandleForReading.readabilityHandler = { handle in
-            let bytes = handle.availableData
-            if !bytes.isEmpty { onBytes(bytes) }
-        }
-        process.terminationHandler = { proc in
-            onExit(proc.terminationStatus)
-        }
+        let child = try HostProcess.spawn(executable: executable, arguments: arguments)
 
         lock.lock()
-        self.pipe = pipe
-        self.process = process
+        pid = child.pid
+        output = child.output
         lock.unlock()
 
-        try process.run()
+        let readerQueue = DispatchQueue(label: "baguette.host-subprocess.\(child.pid)")
+        readerQueue.async {
+            while true {
+                let bytes = child.output.availableData
+                guard !bytes.isEmpty else { break }
+                onBytes(bytes)
+            }
+        }
+        DispatchQueue.global().async { [self] in
+            let status = HostProcess.wait(for: child.pid)
+            didExit(pid: child.pid)
+            readerQueue.async {
+                try? child.output.close()
+                onExit(status)
+            }
+        }
     }
 
     func terminate() {
         lock.lock()
-        let proc = self.process
-        let pipe = self.pipe
+        let pid = self.pid
+        self.pid = nil
+        let output = self.output
+        self.output = nil
         lock.unlock()
-        if let proc, proc.isRunning { proc.terminate() }
-        pipe?.fileHandleForReading.readabilityHandler = nil
-        try? pipe?.fileHandleForReading.close()
-        try? pipe?.fileHandleForWriting.close()
+        if let pid {
+            kill(pid, SIGTERM)
+        }
+        try? output?.close()
+    }
+
+    private func didExit(pid: pid_t) {
+        lock.lock()
+        if self.pid == pid {
+            self.pid = nil
+            output = nil
+        }
+        lock.unlock()
     }
 }
