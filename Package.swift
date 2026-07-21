@@ -14,7 +14,11 @@ import PackageDescription
 // runtime dlopen path already handles every install location correctly.
 let package = Package(
     name: "Baguette",
-    platforms: [.macOS(.v15)],
+    platforms: [
+        .macOS(.v15),
+        .iOS("26.0"),
+        .macCatalyst("26.0"),
+    ],
     products: [
         .library(
             name: "BaguetteCore",
