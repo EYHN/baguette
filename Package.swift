@@ -16,7 +16,6 @@ let package = Package(
     name: "Baguette",
     platforms: [
         .macOS(.v15),
-        .iOS("26.0"),
         .macCatalyst("26.0"),
     ],
     products: [
