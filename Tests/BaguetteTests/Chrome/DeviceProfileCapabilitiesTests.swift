@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Xcode 27 stopped publishing screen dimensions in `profile.plist`.
 /// The `mainScreenWidth` / `mainScreenHeight` / `mainScreenScale` keys

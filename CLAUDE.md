@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## TDD is non-negotiable (read this first)
 
-**You MUST write a failing test before writing any production code.** This rule overrides every other instinct, including "the change is small", "it's just a one-liner", "I'll add the test after". If you catch yourself opening a file under `Sources/Baguette/` before a test under `Tests/BaguetteTests/` exists and fails, stop and reverse course.
+**You MUST write a failing test before writing any production code.** This rule overrides every other instinct, including "the change is small", "it's just a one-liner", "I'll add the test after". If you catch yourself opening a file under `Sources/BaguetteCore/` before a test under `Tests/BaguetteTests/` exists and fails, stop and reverse course.
 
 **Pre-implementation gate** — before editing anything in `Sources/` (Domain value type, Domain abstraction, Infrastructure adapter, App-layer command), you must have done all of the following in order:
 
@@ -23,16 +23,16 @@ Every `@Mockable protocol` in this codebase is named **for the role it plays in 
 
 ### Splitting an adapter that wraps 3rd-party I/O
 
-When an Infrastructure adapter wraps a private framework or external I/O (private SimulatorKit / CoreSimulator / AccessibilityPlatformTranslation symbols, `Foundation.Process`, `Pipe`, `dlopen`, …), the file gets two responsibilities:
+When an Infrastructure adapter wraps a private framework or external I/O (private SimulatorKit / CoreSimulator / AccessibilityPlatformTranslation symbols, `HostProcess`/posix_spawn, `Pipe`, `dlopen`, …), the file gets two responsibilities:
 
 - **What it does** — the value-domain orchestration (state transitions, recursion, byte-to-line splitting, frame projection, error mapping). This MUST be unit-tested.
-- **How it talks to the outside** — the irreducible private-API call (`dlopen`, `class_getMethodImplementation`, `Process.run`, `kill(pid)`). This is integration-only.
+- **How it talks to the outside** — the irreducible private-API call (`dlopen`, `class_getMethodImplementation`, `HostProcess.spawn`, `kill(pid)`). This is integration-only.
 
 Always separate the two. Two patterns, picked by the **shape of the irreducible call**:
 
 1. **One-shot fetch** — the adapter makes a single private-API call, then operates on the value it gets back (e.g. `AXPTranslator.frontmostApplicationWithDisplayId:` returns one `AXPMacPlatformElement`, then we walk it). Lift the post-fetch logic into a **pure static factory or value type in `Domain/`** (`AXNode.walk(from:transform:)`, `AXFrameTransform.map(_:)`, `LineBuffer`). Drive it directly with `Fake…` `NSObject` subclasses that override KVC. The Infrastructure adapter shrinks to "make the call, hand the result to the static factory." No new abstraction needed.
 
-2. **Conversational I/O** — the adapter talks back-and-forth with the outside (start / stream-bytes / signal-exit / terminate). Pure helpers don't capture the state machine cleanly. Introduce **one small `@Mockable` collaborator named like a domain noun** (`Subprocess`, never `LogProcessPort`) — start / terminate / `onBytes` / `onExit`. The orchestrator depends on `any Subprocess`; tests inject `MockSubprocess` and drive the state machine deterministically. The concrete impl (`HostSubprocess`) is a thin wrapper over `Foundation.Process` (~30 LOC) — integration-only.
+2. **Conversational I/O** — the adapter talks back-and-forth with the outside (start / stream-bytes / signal-exit / terminate). Pure helpers don't capture the state machine cleanly. Introduce **one small `@Mockable` collaborator named like a domain noun** (`Subprocess`, never `LogProcessPort`) — start / terminate / `onBytes` / `onExit`. The orchestrator depends on `any Subprocess`; tests inject `MockSubprocess` and drive the state machine deterministically. The concrete impl (`HostSubprocess`) is a thin wrapper over `HostProcess` (posix_spawn) — integration-only.
 
 The naming bar is the same for both: **collaborators are domain nouns, never pattern labels**. If the noun isn't obvious, the abstraction probably shouldn't exist yet.
 
@@ -40,7 +40,7 @@ The naming bar is the same for both: **collaborators are domain nouns, never pat
 
 **~100% of Domain.** Every Domain value type, every static factory, every `@Mockable` collaborator's behaviour-spec is covered.
 
-**Infrastructure adapters split as above.** The orchestrator inside the adapter is unit-tested via the collaborator's `MockXxx`; only the irreducible call lines stay uncovered. Concretely: in `AXPTranslatorAccessibility`, the `dlopen` + `+sharedInstance` + `frontmostApplicationWithDisplayId:` + `macPlatformElementFromTranslation:` four-line dance is the only integration-only block — everything else (the walk, the transform, the value extractors, the dispatcher's lifecycle) lives in `Domain/` and is unit-covered. In `SimDeviceLogStream`, the `Process.run` + `kill(pid)` lines are integration-only; the state machine + `LineBuffer` flush are covered via `MockSubprocess`. New code must include the unit-testable portion before it lands.
+**Infrastructure adapters split as above.** The orchestrator inside the adapter is unit-tested via the collaborator's `MockXxx`; only the irreducible call lines stay uncovered. Concretely: in `AXPTranslatorAccessibility`, the `dlopen` + `+sharedInstance` + `frontmostApplicationWithDisplayId:` + `macPlatformElementFromTranslation:` four-line dance is the only integration-only block — everything else (the walk, the transform, the value extractors, the dispatcher's lifecycle) lives in `Domain/` and is unit-covered. In `SimDeviceLogStream`, the `HostProcess.spawn` + `kill(pid)` lines are integration-only; the state machine + `LineBuffer` flush are covered via `MockSubprocess`. New code must include the unit-testable portion before it lands.
 
 **If you skip the gate, you are violating the project's primary rule.** The Chicago-school workflow, value-type domain, and `@Mockable` collaborator pattern are described in [Testing approach](#testing-approach).
 
@@ -63,7 +63,7 @@ Tests use **Swift Testing** (`@Suite`, `@Test`, `#expect`) — never XCTest. `MO
 Three-layer split with strict inward-flowing imports: `App` → `Domain` + `Infrastructure`; `Infrastructure` → `Domain`; `Domain` depends only on Foundation + IOSurface.
 
 ```
-Sources/Baguette/
+Sources/BaguetteCore/          # library: App/Domain/Infrastructure/Resources
 ├── App/                CLI dispatch (ArgumentParser) + use-case orchestration
 ├── Domain/             pure Swift; value types + @Mockable abstractions named after their domain role
 ├── Infrastructure/     concrete @Mockable abstraction impls (private-API code lives here only)
@@ -78,7 +78,7 @@ Both `baguette input` (stdin JSON, used by host plugins as a long-lived subproce
 
 ### The crucial detail: 9-arg `IndigoHIDMessageForMouseNSEvent`
 
-iOS 26 changed `SimulatorHID`'s wire format. The 5-arg signature used by `idb` / `AXe` routes to a pointer service that drops messages or crashes `backboardd`. Baguette uses the **9-arg signature from Xcode 26's preview-kit**, which routes to digitizer target `0x32`. The recipe lives in `Sources/Baguette/Infrastructure/Input/IndigoHIDInput.swift` (heavily commented).
+iOS 26 changed `SimulatorHID`'s wire format. The 5-arg signature used by `idb` / `AXe` routes to a pointer service that drops messages or crashes `backboardd`. Baguette uses the **9-arg signature from Xcode 26's preview-kit**, which routes to digitizer target `0x32`. The recipe lives in `Sources/BaguetteCore/Infrastructure/Input/IndigoHIDInput.swift` (heavily commented).
 
 `IndigoHIDMessageForMouseNSEvent` reads AppKit / NSEvent thread-local state, so it **must run on `MainActor`**. Calling it from a NIO event-loop thread builds malformed messages that the simulator silently drops. `Server.streamWS` hops to `MainActor` before invoking `GestureDispatcher`. Buttons (`IndigoHIDMessageForButton`) are pure C and thread-safe — useful as a sanity check when input fails.
 
@@ -118,4 +118,4 @@ Chicago-school state-based throughout. Every external boundary is an `@Mockable`
 
 - `README.md` — quickstart, full CLI reference, wire protocol JSON examples.
 - `docs/ARCHITECTURE.md` — end-to-end tap-to-`UITouch` flow, layer diagrams, route table.
-- `Sources/Baguette/Infrastructure/Input/IndigoHIDInput.swift` — the 9-arg recipe.
+- `Sources/BaguetteCore/Infrastructure/Input/IndigoHIDInput.swift` — the 9-arg recipe.

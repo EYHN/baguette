@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Handler-level coverage for the file-upload route. We test the pure
 /// dispatch helper (`Server.addFile`) rather than the Hummingbird

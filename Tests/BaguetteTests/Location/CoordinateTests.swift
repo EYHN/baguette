@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Pure-value coverage for `Coordinate` — the validated lat/lon pair and
 /// its projection to the `"<lat>,<lon>"` argument simctl expects. simctl
