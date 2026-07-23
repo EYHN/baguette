@@ -20,10 +20,8 @@ protocol Chromes: AnyObject, Sendable {
     /// that device-type shares the same chrome bundle, so keying on
     /// UDID would cache identical results redundantly.
     ///
-    /// Returns `nil` when no chrome bundle covers the device
-    /// (e.g. Apple TV / watchOS) or any underlying asset fails to
-    /// load. The caller decides whether to fall back to a plain
-    /// stream.
+    /// Returns `nil` when the device is intentionally frameless or an
+    /// underlying DeviceKit asset fails to load.
     func assets(forDeviceName deviceName: String) -> DeviceChromeAssets?
 }
 
@@ -93,7 +91,10 @@ struct DeviceChromeAssets: Sendable, Equatable {
     func layoutJSON(buttonImageURLPrefix: String? = nil) -> String {
         let originalCompositeSize = Size(
             width:  composite.size.width  - buttonMargins.left - buttonMargins.right,
-            height: composite.size.height - buttonMargins.top  - buttonMargins.bottom
+            height: composite.size.height
+                - buttonMargins.top
+                - buttonMargins.bottom
+                - (chrome.stand?.height ?? 0)
         )
         let baseScreen = chrome.screenRect(in: originalCompositeSize)
         let buttons: [[String: Any]] = chrome.buttons.map { b in
