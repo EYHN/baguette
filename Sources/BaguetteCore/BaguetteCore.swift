@@ -64,6 +64,13 @@ public struct BaguetteCoreHarness: Sendable {
         return json
     }
 
+    public func devicePresentation(udid: String) throws -> DevicePresentationSnapshot {
+        let simulator = try simulator(udid: udid)
+        return try Self.presentations
+            .presentation(forDeviceName: simulator.deviceTypeName)
+            .snapshot
+    }
+
     public func dispatchInputLine(udid: String, line: String) throws -> String {
         let input = try simulator(udid: udid).input()
         return GestureDispatcher(input: input).dispatch(line: line)
@@ -177,6 +184,11 @@ public struct BaguetteCoreHarness: Sendable {
             rasterizer: CoreGraphicsPDFRasterizer()
         )
     }
+
+    private static let presentations = LiveDevicePresentations(
+        store: FileSystemChromeStore(),
+        rasterizer: CoreGraphicsPDFRasterizer()
+    )
 }
 
 /// Persistent input dispatcher for one simulator (see `makeInputSession`).

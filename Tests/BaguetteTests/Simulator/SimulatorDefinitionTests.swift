@@ -168,6 +168,16 @@ struct SimulatorDefinitionTests {
         #expect(abs(vol.box.topPct  - 30.0) < 0.001)
     }
 
+    @Test func `bottom center home button is centred on the device bottom edge`() {
+        let def = Self.composeFixtureWithBottomCenterButton()
+        let home = def.buttons[0]
+
+        #expect(abs(home.box.leftPct - 43.75) < 0.001)
+        #expect(abs(home.box.topPct - 98.75) < 0.001)
+        #expect(abs(home.box.widthPct - 12.5) < 0.001)
+        #expect(abs(home.box.heightPct - 2.5) < 0.001)
+    }
+
     @Test func `button transforms drive the at-rest -> hover -> pressed animation as image-space percents`() {
         // power: normal=(−8, 320), rollover=(−3, 320), image 10×30
         // outDx = (−3 − (−8)) / 10 = 50%    outDy = 0
@@ -323,6 +333,49 @@ struct SimulatorDefinitionTests {
         )
         return SimulatorDefinition.compose(
             from: sim, chrome: assets, urlPrefix: "/simulators/UDID-IPAD"
+        )
+    }
+
+    static func composeFixtureWithBottomCenterButton() -> SimulatorDefinition {
+        let sim = MockSimulator()
+        given(sim).udid.willReturn("UDID-HOME")
+        given(sim).name.willReturn("iPhone")
+        given(sim).deviceTypeName.willReturn("iPhone")
+
+        let chrome = DeviceChrome(
+            identifier: "phone",
+            screenInsets: Insets(top: 20, left: 10, bottom: 20, right: 10),
+            outerCornerRadius: 60,
+            buttons: [
+                ChromeButton(
+                    name: "home",
+                    imageName: "Home BTN",
+                    anchor: .bottom,
+                    align: .center,
+                    offset: Point(x: 0, y: -10),
+                    onTop: true
+                ),
+            ],
+            compositeImageName: "PhoneComposite"
+        )
+        let assets = DeviceChromeAssets(
+            chrome: chrome,
+            composite: ChromeImage(
+                data: Data("MERGED".utf8),
+                size: Size(width: 400, height: 800)
+            ),
+            buttonImages: [
+                "home": ChromeImage(
+                    data: Data("HOME".utf8),
+                    size: Size(width: 50, height: 20)
+                ),
+            ]
+        )
+
+        return SimulatorDefinition.compose(
+            from: sim,
+            chrome: assets,
+            urlPrefix: "/simulators/UDID-HOME"
         )
     }
 

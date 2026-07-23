@@ -21,12 +21,11 @@ protocol PDFRasterizer: Sendable {
     /// `bezel.png`.
     func compose(canvasSize: Size, layers: [ImageLayer]) throws -> ChromeImage
 
-    /// Compose a 9-slice bezel for chrome bundles that don't ship a
-    /// pre-baked composite (every iPad bundle, plus `phone13` for
-    /// iPhone 17e). Output canvas is `innerSize` expanded by `insets`
-    /// on each side; corners stretch into the inset-sized cap rects and
-    /// edges fill the gaps between corners. PDFs are drawn as vector
-    /// pages so the scaling stays crisp regardless of the source size.
+    /// Compose a DeviceKit 9-slice bezel at an exact screen size.
+    /// Output canvas is `innerSize` expanded by `insets` on each side.
+    /// Corners keep their own native dimensions; each edge keeps its
+    /// own native thickness and stretches only along the gap between
+    /// its adjacent corners.
     ///
     /// `innerSize` is the simulator screen's 1× point dimensions
     /// (`mainScreenWidth/Height ÷ mainScreenScale` from the plist).
@@ -36,6 +35,14 @@ protocol PDFRasterizer: Sendable {
         pdfs: NineSlicePDFs,
         insets: Insets,
         innerSize: Size
+    ) throws -> ChromeImage
+
+    /// Compose a horizontal three-slice decoration. The left and right
+    /// caps keep their native widths while the center stretches to fill
+    /// the requested size.
+    func composeHorizontalSlice(
+        pdfs: HorizontalSlicePDFs,
+        size: Size
     ) throws -> ChromeImage
 }
 
@@ -52,6 +59,12 @@ struct NineSlicePDFs: Sendable, Equatable {
     let bottom: Data
     let bottomLeft: Data
     let left: Data
+}
+
+struct HorizontalSlicePDFs: Sendable, Equatable {
+    let left: Data
+    let center: Data
+    let right: Data
 }
 
 /// One entry in a `compose(...)` call — an already-rasterized
@@ -215,28 +228,59 @@ struct CoreGraphicsPDFRasterizer: PDFRasterizer {
             throw PDFRasterizerError.rasterFailed
         }
 
-        // Corners drawn at NATIVE PDF size (e.g. 97×97 for phone13)
-        // — they include the rounded outer curve plus enough solid
-        // bezel to overlap into the screen-rect area. Assume all four
-        // corners share TL's dimensions; holds for every DeviceKit
-        // bundle Apple ships.
-        let cornerW = CGFloat(topLeft.width)
-        let cornerH = CGFloat(topLeft.height)
-        let midW = max(canvasW - cornerW * 2, 0)
-        let midH = max(canvasH - cornerH * 2, 0)
+        // DeviceKit normally ships symmetric pieces, but the PDFs are
+        // individually authoritative. Keeping every corner's native
+        // dimensions and every edge's native thickness also handles
+        // asymmetric chromes without scaling one piece to TL's size.
+        let tlW = CGFloat(topLeft.width), tlH = CGFloat(topLeft.height)
+        let trW = CGFloat(topRight.width), trH = CGFloat(topRight.height)
+        let brW = CGFloat(bottomRight.width), brH = CGFloat(bottomRight.height)
+        let blW = CGFloat(bottomLeft.width), blH = CGFloat(bottomLeft.height)
+        let topH = CGFloat(top.height)
+        let rightW = CGFloat(right.width)
+        let bottomH = CGFloat(bottom.height)
+        let leftW = CGFloat(left.width)
 
         // CG origin is bottom-left; layout below is in CG user space.
-        let topLeftRect     = CGRect(x: 0,                 y: canvasH - cornerH, width: cornerW, height: cornerH)
-        let topRightRect    = CGRect(x: canvasW - cornerW, y: canvasH - cornerH, width: cornerW, height: cornerH)
-        let bottomLeftRect  = CGRect(x: 0,                 y: 0,                 width: cornerW, height: cornerH)
-        let bottomRightRect = CGRect(x: canvasW - cornerW, y: 0,                 width: cornerW, height: cornerH)
-        // Edges stretch perpendicular to their long axis — top/bottom
-        // pieces (1×97 native) span midW horizontally; left/right
-        // pieces (97×1 native) span midH vertically.
-        let topRect    = CGRect(x: cornerW, y: canvasH - cornerH, width: midW,    height: cornerH)
-        let bottomRect = CGRect(x: cornerW, y: 0,                 width: midW,    height: cornerH)
-        let leftRect   = CGRect(x: 0,                 y: cornerH, width: cornerW, height: midH)
-        let rightRect  = CGRect(x: canvasW - cornerW, y: cornerH, width: cornerW, height: midH)
+        let topLeftRect = CGRect(
+            x: 0, y: canvasH - tlH, width: tlW, height: tlH
+        )
+        let topRightRect = CGRect(
+            x: canvasW - trW, y: canvasH - trH, width: trW, height: trH
+        )
+        let bottomLeftRect = CGRect(
+            x: 0, y: 0, width: blW, height: blH
+        )
+        let bottomRightRect = CGRect(
+            x: canvasW - brW, y: 0, width: brW, height: brH
+        )
+
+        // Edges stretch only along their seam. Their perpendicular
+        // thickness comes from the edge PDF itself, not any corner.
+        let topRect = CGRect(
+            x: tlW,
+            y: canvasH - topH,
+            width: max(canvasW - tlW - trW, 0),
+            height: topH
+        )
+        let bottomRect = CGRect(
+            x: blW,
+            y: 0,
+            width: max(canvasW - blW - brW, 0),
+            height: bottomH
+        )
+        let leftRect = CGRect(
+            x: 0,
+            y: blH,
+            width: leftW,
+            height: max(canvasH - tlH - blH, 0)
+        )
+        let rightRect = CGRect(
+            x: canvasW - rightW,
+            y: brH,
+            width: rightW,
+            height: max(canvasH - trH - brH, 0)
+        )
 
         for (image, target) in [
             (topLeft,     topLeftRect),
@@ -255,6 +299,64 @@ struct CoreGraphicsPDFRasterizer: PDFRasterizer {
             throw PDFRasterizerError.rasterFailed
         }
         return try ChromeImage(cgImage: cgImage)
+    }
+
+    func composeHorizontalSlice(
+        pdfs: HorizontalSlicePDFs,
+        size: Size
+    ) throws -> ChromeImage {
+        let left = try rasterizeCG(pdfs.left)
+        let center = try rasterizeCG(pdfs.center)
+        let right = try rasterizeCG(pdfs.right)
+        let width = Int(size.width.rounded())
+        let height = Int(size.height.rounded())
+        guard width > 0, height > 0 else {
+            throw PDFRasterizerError.rasterFailed
+        }
+
+        let leftWidth = CGFloat(left.width)
+        let rightWidth = CGFloat(right.width)
+        let centerWidth = max(size.width - leftWidth - rightWidth, 0)
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw PDFRasterizerError.rasterFailed
+        }
+
+        let targets = [
+            (left, CGRect(
+                x: 0,
+                y: 0,
+                width: leftWidth,
+                height: size.height
+            )),
+            (center, CGRect(
+                x: leftWidth,
+                y: 0,
+                width: centerWidth,
+                height: size.height
+            )),
+            (right, CGRect(
+                x: size.width - rightWidth,
+                y: 0,
+                width: rightWidth,
+                height: size.height
+            )),
+        ]
+        for (image, target) in targets
+        where target.width > 0 && target.height > 0 {
+            context.draw(image, in: target)
+        }
+        guard let image = context.makeImage() else {
+            throw PDFRasterizerError.rasterFailed
+        }
+        return try ChromeImage(cgImage: image)
     }
 
     /// Render the first page of a PDF to a `CGImage` at native size.
