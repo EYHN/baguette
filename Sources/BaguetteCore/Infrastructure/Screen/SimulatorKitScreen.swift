@@ -20,6 +20,7 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
     private var descriptors: [NSObject] = []
     private var callbackUUIDs: [ObjectIdentifier: NSUUID] = [:]
     private var onFrame: (@Sendable (IOSurface) -> Void)?
+    private var onMetadata: (@Sendable (ScreenMetadata) -> Void)?
 
     init(udid: String, host: any DeviceHost) {
         self.udid = udid
@@ -30,8 +31,12 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         host.resolveDevice(udid: udid)
     }
 
-    func start(onFrame: @escaping @Sendable (IOSurface) -> Void) throws {
+    func start(
+        onFrame: @escaping @Sendable (IOSurface) -> Void,
+        onMetadata: @escaping @Sendable (ScreenMetadata) -> Void
+    ) throws {
         self.onFrame = onFrame
+        self.onMetadata = onMetadata
 
         guard let device = resolveDevice() else {
             throw SimulatorError.notFound(udid: udid)
@@ -41,7 +46,7 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         else {
             throw ScreenError.ioUnavailable
         }
-        self.ioClient = io
+        ioClient = io
         try wireFramebuffer()
     }
 
@@ -49,7 +54,8 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         let unregSel = NSSelectorFromString("unregisterScreenCallbacksWithUUID:")
         for desc in descriptors {
             if let uuid = callbackUUIDs[ObjectIdentifier(desc)],
-               desc.responds(to: unregSel) {
+               desc.responds(to: unregSel)
+            {
                 desc.perform(unregSel, with: uuid)
             }
         }
@@ -57,6 +63,7 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         callbackUUIDs.removeAll()
         ioClient = nil
         onFrame = nil
+        onMetadata = nil
     }
 
     // MARK: - private
@@ -104,12 +111,14 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         callbackUUIDs[ObjectIdentifier(desc)] = uuid
 
         let frame: @convention(block) () -> Void = { [weak self] in
-            self?.queue.async { self?.captureLatest() }
+            self?.enqueueLatestFrame()
         }
         let surfaces: @convention(block) () -> Void = { [weak self] in
-            self?.queue.async { self?.captureLatest() }
+            self?.enqueueLatestFrame()
         }
-        let props: @convention(block) () -> Void = {}
+        let props: @convention(block) (AnyObject?) -> Void = { [weak self] _ in
+            self?.enqueueLatestMetadata()
+        }
 
         guard let imp = class_getMethodImplementation(type(of: desc), regSel) else {
             throw ScreenError.callbackUnavailable
@@ -124,23 +133,66 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         )
     }
 
+    private func enqueueLatestFrame() {
+        queue.async { [weak self] in
+            self?.captureLatest()
+        }
+    }
+
+    private func enqueueLatestMetadata() {
+        queue.async { [weak self] in
+            self?.captureLatestMetadata()
+        }
+    }
+
     /// Picks the descriptor whose live surface has the largest area —
     /// secondary planes / overlays are typically smaller than the main
-    /// screen — and forwards the IOSurface to `onFrame`.
+    /// screen — and forwards its IOSurface and authoritative properties.
     private func captureLatest() {
+        guard let latest = latestFramebuffer() else { return }
+        onMetadata?(metadata(for: latest.descriptor))
+        onFrame?(latest.surface)
+    }
+
+    /// Property callbacks do not imply new pixels. Publish metadata from the
+    /// same selected descriptor without manufacturing a framebuffer event.
+    private func captureLatestMetadata() {
+        guard let latest = latestFramebuffer() else { return }
+        onMetadata?(metadata(for: latest.descriptor))
+    }
+
+    private func latestFramebuffer() -> (surface: IOSurface, descriptor: NSObject)? {
         let surfSel = NSSelectorFromString("framebufferSurface")
-        var best: IOSurface?
+        var best: (surface: IOSurface, descriptor: NSObject)?
         var bestArea = 0
         for desc in descriptors {
             guard let surfObj = desc.perform(surfSel)?.takeUnretainedValue() else { continue }
-            let surf = unsafeBitCast(surfObj, to: IOSurface.self)
+            let surf = unsafeDowncast(surfObj, to: IOSurface.self)
             let area = IOSurfaceGetWidth(surf) * IOSurfaceGetHeight(surf)
             if area > bestArea {
-                best = surf
+                best = (surf, desc)
                 bestArea = area
             }
         }
-        if let best { onFrame?(best) }
+        return best
+    }
+
+    private func metadata(for descriptor: NSObject) -> ScreenMetadata {
+        let propertiesSelector = NSSelectorFromString("screenProperties")
+        let orientationSelector = NSSelectorFromString("uiOrientation")
+        guard descriptor.responds(to: propertiesSelector),
+              let properties = descriptor.perform(propertiesSelector)?
+              .takeUnretainedValue() as? NSObject,
+              properties.responds(to: orientationSelector),
+              let rawValue = properties.value(forKey: "uiOrientation") as? NSNumber
+        else {
+            return ScreenMetadata(uiOrientation: nil)
+        }
+        return ScreenMetadata(
+            uiOrientation: ScreenOrientation(
+                simulatorKitRawValue: rawValue.intValue
+            )
+        )
     }
 }
 
