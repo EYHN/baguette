@@ -22,6 +22,9 @@ public final class RawFrameCapture: @unchecked Sendable {
         public let width: Int
         public let height: Int
         public let captureMicros: UInt64
+        /// SimulatorKit `screenProperties.uiOrientation`: 1...4, or 0
+        /// while the property is unavailable.
+        public let uiOrientationRaw: UInt32
         /// Tightly packed planes: Y (w*h), U (w/2*h/2), V (w/2*h/2).
         public let planes: UnsafeRawBufferPointer
     }
@@ -41,14 +44,12 @@ public final class RawFrameCapture: @unchecked Sendable {
     private var scale = 1
     private var onFrame: (@Sendable (Payload) -> Void)?
 
-    /// Last converted payload (header stripped), re-emitted by the pump.
-    private var lastPlanes = Data()
-    private var lastWidth = 0
-    private var lastHeight = 0
+    /// Last converted pixels plus independently changing screen metadata.
+    private var payloadCache = RawFramePayloadCache()
 
     public init(udid: String, deviceSetPath: String? = nil) {
         self.udid = udid
-        self.simulators = CoreSimulators(deviceSetPath: deviceSetPath)
+        simulators = CoreSimulators(deviceSetPath: deviceSetPath)
     }
 
     /// Starts frame delivery. `onFrame` runs on the capture queue.
@@ -67,9 +68,14 @@ public final class RawFrameCapture: @unchecked Sendable {
         self.onFrame = onFrame
         let screen = sim.screen()
         self.screen = screen
-        try screen.start { [weak self] surface in
-            self?.handle(surface)
-        }
+        try screen.start(
+            onFrame: { [weak self] surface in
+                self?.handle(surface)
+            },
+            onMetadata: { [weak self] metadata in
+                self?.handle(metadata)
+            }
+        )
     }
 
     public func stop() {
@@ -81,7 +87,7 @@ public final class RawFrameCapture: @unchecked Sendable {
         queue.sync {
             pump?.cancel()
             pump = nil
-            lastPlanes = Data()
+            payloadCache.clear()
             onFrame = nil
         }
     }
@@ -102,8 +108,8 @@ public final class RawFrameCapture: @unchecked Sendable {
         return dispatcher.dispatch(line: line)
     }
 
-    // Debug counters (SIMKIT_RTC_DEBUG): compositor callback rate vs
-    // conversion cost, printed once per second to stderr.
+    /// Debug counters (SIMKIT_RTC_DEBUG): compositor callback rate vs
+    /// conversion cost, printed once per second to stderr.
     private let debugEnabled =
         ProcessInfo.processInfo.environment["SIMKIT_RTC_DEBUG"] != nil
     private var dbgWindowStart = DispatchTime.now()
@@ -137,6 +143,12 @@ public final class RawFrameCapture: @unchecked Sendable {
         }
     }
 
+    private func handle(_ metadata: ScreenMetadata) {
+        queue.async { [weak self] in
+            self?.payloadCache.update(metadata: metadata)
+        }
+    }
+
     /// Scale + convert a fresh compositor surface, cache the result, emit.
     /// The conversion reads the IOSurface directly (locked read-only); at
     /// scale > 1 a vImage CPU downscale into reused storage runs first —
@@ -160,9 +172,11 @@ public final class RawFrameCapture: @unchecked Sendable {
         // the embedding API carries dimensions natively.
         let headerSize = 16
         guard payload.count > headerSize else { return }
-        lastWidth = Int(readBigEndianU32(payload, at: 0))
-        lastHeight = Int(readBigEndianU32(payload, at: 4))
-        lastPlanes = payload.subdata(in: headerSize..<payload.count)
+        payloadCache.store(
+            width: Int(readBigEndianU32(payload, at: 0)),
+            height: Int(readBigEndianU32(payload, at: 4)),
+            planes: payload.subdata(in: headerSize ..< payload.count)
+        )
         emitCached()
     }
 
@@ -184,7 +198,7 @@ public final class RawFrameCapture: @unchecked Sendable {
             width: vImagePixelCount(srcW),
             rowBytes: IOSurfaceGetBytesPerRow(surface)
         )
-        let converted: Data? = scaledPixels.withUnsafeMutableBytes { raw -> Data? in
+        return scaledPixels.withUnsafeMutableBytes { raw -> Data? in
             var dst = vImage_Buffer(
                 data: raw.baseAddress,
                 height: vImagePixelCount(dstH),
@@ -208,18 +222,15 @@ public final class RawFrameCapture: @unchecked Sendable {
                 height: dstH
             )
         }
-        return converted
     }
 
     /// Emits the cached planes without conversion (used for both fresh
     /// frames right after conversion and idle pump re-emits).
     private func emitCached() {
-        guard !lastPlanes.isEmpty, let onFrame else { return }
-        let width = lastWidth
-        let height = lastHeight
+        guard let onFrame else { return }
         let micros = UInt64(Date().timeIntervalSince1970 * 1_000_000)
-        lastPlanes.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
-            onFrame(Payload(width: width, height: height, captureMicros: micros, planes: raw))
+        payloadCache.withPayload(captureMicros: micros) { payload in
+            onFrame(payload)
         }
     }
 
@@ -240,9 +251,52 @@ public final class RawFrameCapture: @unchecked Sendable {
 
     private func readBigEndianU32(_ data: Data, at offset: Int) -> UInt32 {
         var value: UInt32 = 0
-        withUnsafeMutableBytes(of: &value) { dest in
-            data.copyBytes(to: dest, from: offset..<(offset + 4))
+        _ = withUnsafeMutableBytes(of: &value) { dest in
+            data.copyBytes(to: dest, from: offset ..< (offset + 4))
         }
         return UInt32(bigEndian: value)
+    }
+}
+
+/// The replayable part of raw capture. Pixel updates and SimulatorKit
+/// property updates are independent, so an idle replay always combines the
+/// last converted planes with the newest orientation.
+struct RawFramePayloadCache {
+    private var planes = Data()
+    private var width = 0
+    private var height = 0
+    private var uiOrientationRaw: UInt32 = 0
+
+    mutating func store(width: Int, height: Int, planes: Data) {
+        self.width = width
+        self.height = height
+        self.planes = planes
+    }
+
+    mutating func update(metadata: ScreenMetadata) {
+        uiOrientationRaw = metadata.uiOrientation?.rawValue ?? 0
+    }
+
+    mutating func clear() {
+        planes = Data()
+        width = 0
+        height = 0
+        uiOrientationRaw = 0
+    }
+
+    func withPayload(
+        captureMicros: UInt64,
+        _ body: (RawFrameCapture.Payload) -> Void
+    ) {
+        guard !planes.isEmpty else { return }
+        planes.withUnsafeBytes { raw in
+            body(RawFrameCapture.Payload(
+                width: width,
+                height: height,
+                captureMicros: captureMicros,
+                uiOrientationRaw: uiOrientationRaw,
+                planes: raw
+            ))
+        }
     }
 }
