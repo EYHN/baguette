@@ -13,7 +13,7 @@ struct RenderedScreenTests {
         let rendered = try #require(Self.surface(width: 4, height: 3))
         var sourceDelivery: (@Sendable (IOSurface) -> Void)?
         let delivered = LockedSurface()
-        given(source).start(onFrame: .any).willProduce { sourceDelivery = $0 }
+        given(source).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in sourceDelivery = onFrame }
         given(source).stop().willReturn()
         given(scene).render(screen: .value(input)).willReturn(rendered)
         let screen = RenderedScreen(source: source, scene: scene)
@@ -36,7 +36,7 @@ struct RenderedScreenTests {
         let rendered = try #require(Self.surface(width: 4, height: 3))
         let release = DispatchSemaphore(value: 0)
         var sourceDelivery: (@Sendable (IOSurface) -> Void)?
-        given(source).start(onFrame: .any).willProduce { sourceDelivery = $0 }
+        given(source).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in sourceDelivery = onFrame }
         given(scene).render(screen: .any).willProduce { _ in
             _ = release.wait(timeout: .now() + 0.15)
             return rendered
@@ -59,7 +59,7 @@ struct RenderedScreenTests {
         let rendered = try #require(Self.surface(width: 4, height: 3))
         var sourceDelivery: (@Sendable (IOSurface) -> Void)?
         let renderCount = LockedCount()
-        given(source).start(onFrame: .any).willProduce { sourceDelivery = $0 }
+        given(source).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in sourceDelivery = onFrame }
         given(scene).render(screen: .any).willProduce { _ in
             renderCount.increment()
             return rendered
