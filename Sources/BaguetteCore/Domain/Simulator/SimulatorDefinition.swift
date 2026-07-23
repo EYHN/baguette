@@ -232,7 +232,10 @@ extension SimulatorDefinition {
         let m = assets.buttonMargins
         let bare = Size(
             width:  merged.width  - m.left - m.right,
-            height: merged.height - m.top  - m.bottom
+            height: merged.height
+                - m.top
+                - m.bottom
+                - (chrome.stand?.height ?? 0)
         )
         let screenRect = chrome.screenRect(in: bare)
 
@@ -382,6 +385,7 @@ extension SimulatorDefinition.Button {
             let leftX: Double
             switch b.align {
             case .trailing: leftX = bareW + restX - imageSize.width
+            case .center:   leftX = (bareW - imageSize.width) / 2 + restX
             case .leading:  leftX = restX
             }
             let leftPctTop = leftX / bareW * 100
@@ -400,6 +404,7 @@ extension SimulatorDefinition.Button {
             let leftX: Double
             switch b.align {
             case .trailing: leftX = bareW + restX - imageSize.width
+            case .center:   leftX = (bareW - imageSize.width) / 2 + restX
             case .leading:  leftX = restX
             }
             let leftPctBottom = leftX / bareW * 100
