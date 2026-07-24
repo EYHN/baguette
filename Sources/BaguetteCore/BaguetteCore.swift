@@ -148,17 +148,7 @@ public struct BaguetteCoreHarness: Sendable {
         stream.stop()
     }
 
-    public func runServer(host: String = "127.0.0.1", port: Int = 8421) async throws {
-        let server = Server(
-            simulators: simulators,
-            chromes: Self.defaultChromes(),
-            host: host,
-            port: port
-        )
-        try await server.run()
-    }
-
-    private var simulators: CoreSimulators {
+    var simulators: CoreSimulators {
         CoreSimulators(deviceSetPath: deviceSetPath)
     }
 
@@ -178,7 +168,7 @@ public struct BaguetteCoreHarness: Sendable {
         return try runAndCapture("/usr/bin/xcrun", command)
     }
 
-    private static func defaultChromes() -> any Chromes {
+    static func defaultChromes() -> any Chromes {
         LiveChromes(
             store: FileSystemChromeStore(),
             rasterizer: CoreGraphicsPDFRasterizer()
