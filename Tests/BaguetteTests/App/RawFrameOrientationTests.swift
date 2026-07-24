@@ -4,6 +4,23 @@ import Testing
 
 @Suite("Raw frame orientation")
 struct RawFrameOrientationTests {
+    @Test func `reads scalar SimulatorKit properties through their Objective-C getter`() {
+        let properties = ScreenPropertiesStub()
+
+        #expect(
+            invokeUInt32Getter(
+                properties,
+                NSSelectorFromString("uiOrientation")
+            ) == 3
+        )
+        #expect(
+            invokeUInt32Getter(
+                properties,
+                NSSelectorFromString("missingProperty")
+            ) == nil
+        )
+    }
+
     @Test func `maps SimulatorKit UI orientation raw values without geometry guesses`() {
         #expect(ScreenOrientation(simulatorKitRawValue: 1) == .portrait)
         #expect(ScreenOrientation(simulatorKitRawValue: 2) == .portraitUpsideDown)
@@ -37,4 +54,8 @@ struct RawFrameOrientationTests {
         #expect(emissions.map(\.orientation) == [0, 3])
         #expect(emissions.map(\.planes) == [planes, planes])
     }
+}
+
+private final class ScreenPropertiesStub: NSObject {
+    @objc dynamic var uiOrientation: UInt32 { 3 }
 }
