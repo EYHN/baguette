@@ -1,6 +1,19 @@
 import Foundation
 import IOSurface
 import ObjectiveC
+import Darwin
+
+private typealias UInt32Getter = @convention(c) (AnyObject, Selector) -> UInt32
+
+private let sendUInt32Message: UInt32Getter = {
+    let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "objc_msgSend")!
+    return unsafeBitCast(symbol, to: UInt32Getter.self)
+}()
+
+func invokeUInt32Getter(_ target: NSObject, _ selector: Selector) -> UInt32? {
+    guard target.responds(to: selector) else { return nil }
+    return sendUInt32Message(target, selector)
+}
 
 /// Production `Screen` — registers SimulatorKit framebuffer callbacks via
 /// the ObjC runtime and forwards `IOSurface` frames to the caller as they
@@ -183,14 +196,13 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         guard descriptor.responds(to: propertiesSelector),
               let properties = descriptor.perform(propertiesSelector)?
               .takeUnretainedValue() as? NSObject,
-              properties.responds(to: orientationSelector),
-              let rawValue = properties.value(forKey: "uiOrientation") as? NSNumber
+              let rawValue = invokeUInt32Getter(properties, orientationSelector)
         else {
             return ScreenMetadata(uiOrientation: nil)
         }
         return ScreenMetadata(
             uiOrientation: ScreenOrientation(
-                simulatorKitRawValue: rawValue.intValue
+                simulatorKitRawValue: Int(rawValue)
             )
         )
     }
