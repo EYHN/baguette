@@ -1,7 +1,7 @@
 import Foundation
 import Mockable
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("Devices")
 struct DevicesTests {

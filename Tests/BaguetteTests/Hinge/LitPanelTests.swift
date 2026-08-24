@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Which of a simulator's panels the chrome, screen and tap space
 /// describe. On a foldable that is the hinge's call; everything else

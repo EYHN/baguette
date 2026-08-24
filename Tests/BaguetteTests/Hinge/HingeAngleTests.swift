@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// A foldable's hinge angle, as `devicectl device motion hinge-angle`
 /// reports it, and which panel that angle leaves lit.

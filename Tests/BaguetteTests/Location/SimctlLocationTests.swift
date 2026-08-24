@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Orchestration coverage for `SimctlLocation` — argv assembly + the
 /// `Subprocess` exit handshake. The irreducible `xcrun` spawn lives in

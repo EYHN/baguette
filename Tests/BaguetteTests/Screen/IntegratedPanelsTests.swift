@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Which live framebuffer ports are the device's own panels — before
 /// Connected Screens has been consulted, from shape alone.

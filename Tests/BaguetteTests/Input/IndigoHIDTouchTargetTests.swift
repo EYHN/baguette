@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// An input surface dispatches touches to an injectable Indigo HID
 /// target. Phone defaults to `IndigoHIDTouchTarget.phone` (`0x32`);

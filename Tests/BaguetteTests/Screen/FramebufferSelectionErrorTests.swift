@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// What an operator reads when a plane will not bind. Until the CLI gained
 /// `--display`, this error only ever reached a WebSocket handler, so it

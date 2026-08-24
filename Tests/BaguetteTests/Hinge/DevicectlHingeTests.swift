@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `DevicectlHinge` reads one sample from `xcrun devicectl device motion
 /// hinge-angle` and stops. The monitor is a stream that runs until its

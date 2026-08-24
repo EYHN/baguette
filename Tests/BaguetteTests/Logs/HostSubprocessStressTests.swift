@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `serve` died of `-[NSConcreteFileHandle readDataOfLength:]: Bad file
 /// descriptor` inside `xcode-select -p` once a long-lived hinge watch

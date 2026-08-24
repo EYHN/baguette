@@ -2,7 +2,7 @@ import Foundation
 import IOSurface
 import Mockable
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 // A foldable has two screens and a hinge. Frames from either panel
 // compose through one scene, posed at the hinge's latest angle, with the
@@ -18,8 +18,8 @@ struct RenderedFoldableTests {
         let rendered = try #require(RenderedScreenTests.surface(width: 4, height: 3))
         var innerDelivery: (@Sendable (IOSurface) -> Void)?
         var coverDelivery: (@Sendable (IOSurface) -> Void)?
-        given(unfolded).start(onFrame: .any).willProduce { innerDelivery = $0 }
-        given(cover).start(onFrame: .any).willProduce { coverDelivery = $0 }
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in innerDelivery = onFrame }
+        given(cover).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in coverDelivery = onFrame }
         given(unfolded).stop().willReturn()
         given(cover).stop().willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 130))
@@ -57,8 +57,8 @@ struct RenderedFoldableTests {
         let rendered = try #require(RenderedScreenTests.surface(width: 4, height: 3))
         var innerDelivery: (@Sendable (IOSurface) -> Void)?
         var onAngle: ((HingeAngle) -> Void)?
-        given(unfolded).start(onFrame: .any).willProduce { innerDelivery = $0 }
-        given(cover).start(onFrame: .any).willReturn()
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in innerDelivery = onFrame }
+        given(cover).start(onFrame: .any, onMetadata: .any).willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 130))
         given(hinge).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
         given(scene).update(hingeDegrees: .any).willReturn()
@@ -80,8 +80,8 @@ struct RenderedFoldableTests {
         let hinge = MockHinge(), watch = MockHingeWatch()
         let scene = MockDeviceScene()
         var onAngle: ((HingeAngle) -> Void)?
-        given(unfolded).start(onFrame: .any).willReturn()
-        given(cover).start(onFrame: .any).willReturn()
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willReturn()
+        given(cover).start(onFrame: .any, onMetadata: .any).willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 130))
         given(hinge).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
         given(scene).update(hingeDegrees: .any).willReturn()
@@ -102,8 +102,8 @@ struct RenderedFoldableTests {
         let rendered = try #require(RenderedScreenTests.surface(width: 4, height: 3))
         var innerDelivery: (@Sendable (IOSurface) -> Void)?
         var onAngle: ((HingeAngle) -> Void)?
-        given(unfolded).start(onFrame: .any).willProduce { innerDelivery = $0 }
-        given(cover).start(onFrame: .any).willReturn()
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in innerDelivery = onFrame }
+        given(cover).start(onFrame: .any, onMetadata: .any).willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 0))
         given(hinge).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
         let order = LockedLog()
@@ -128,8 +128,8 @@ struct RenderedFoldableTests {
         given(scene2).render(screens: .any).willProduce { _ in late.append("render"); return rendered }
         let unfolded2 = MockScreen(), cover2 = MockScreen()
         var delivery2: (@Sendable (IOSurface) -> Void)?
-        given(unfolded2).start(onFrame: .any).willProduce { delivery2 = $0 }
-        given(cover2).start(onFrame: .any).willReturn()
+        given(unfolded2).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in delivery2 = onFrame }
+        given(cover2).start(onFrame: .any, onMetadata: .any).willReturn()
         let waiting = RenderedFoldable(unfolded: unfolded2, cover: cover2, hinge: mute, scene: scene2)
         try waiting.start { _ in }
         delivery2?(inner)

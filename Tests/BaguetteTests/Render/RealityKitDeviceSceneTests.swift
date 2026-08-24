@@ -2,7 +2,7 @@ import Foundation
 import IOSurface
 import Testing
 
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("RealityKitDeviceScene")
 struct RealityKitDeviceSceneTests {
@@ -179,7 +179,7 @@ struct RealityKitDeviceSceneTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let models = try LiveDeviceModels(rootURLs: [
-            repository.appending(path: "Sources/Baguette/Resources/Models3D")
+            repository.appending(path: "Sources/BaguetteCore/Resources/Models3D")
         ])
         let model = try #require(try models.find(id: "iphone-17-pro-max"))
         let scene = try RealityKitDeviceScene(plan: DeviceRenderPlan.build(
@@ -204,7 +204,7 @@ struct RealityKitDeviceSceneTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let models = try LiveDeviceModels(rootURLs: [
-            repository.appending(path: "Sources/Baguette/Resources/Models3D")
+            repository.appending(path: "Sources/BaguetteCore/Resources/Models3D")
         ])
         let model = try #require(try models.find(id: "iphone-17-pro-max"))
         let plan = try DeviceRenderPlan.build(

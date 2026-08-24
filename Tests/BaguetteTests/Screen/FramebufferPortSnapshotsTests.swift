@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Live IOSurface sizes join to Connected Screens by closest pixel size
 /// so Creatable CarPlay 101 never stamps a phone or external port.

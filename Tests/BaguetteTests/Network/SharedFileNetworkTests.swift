@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Orchestration coverage for `SharedFileNetwork` — publishing a
 /// `NetworkCondition` where the injected dylib can read it, and arming /

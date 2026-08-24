@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// One monitor per device. Every stream socket on a foldable wants the
 /// sweep and every bind wants the current angle; spawning a devicectl

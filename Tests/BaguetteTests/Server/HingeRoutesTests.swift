@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `GET /simulators/<udid>/hinge` — what the page polls on a foldable
 /// to learn that the pose changed under it, so it can re-bind the
