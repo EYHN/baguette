@@ -2,7 +2,7 @@ import Foundation
 import Mockable
 import Testing
 
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `GET /simulators/:udid/companion-screens.json` — what the focus-mode
 /// screens rail asks before it offers anything. A device with no CarPlay

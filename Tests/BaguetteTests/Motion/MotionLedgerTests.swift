@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Pure-value coverage for `MotionLedger` — the running totals a
 /// `CMPedometer` reports.

@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `simctl list pairs -j` is the host's whole pairing table, not one
 /// device's. A phone finds its watch by looking for the pair whose

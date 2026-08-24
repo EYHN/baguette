@@ -3,7 +3,7 @@ import Foundation
 import ImageIO
 import Mockable
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Handler-level tests for the sized screenshot routes.
 ///

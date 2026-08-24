@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// The question every request asks before a handler runs: is this a
 /// plugin, and if so may it be here?

@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Coverage for `MotionSessions` — the per-simulator motion state the
 /// server's stateless route handlers reach through.

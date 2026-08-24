@@ -3,7 +3,7 @@ import CoreImage
 import CoreVideo
 import Foundation
 import IOSurface
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `AVAssetWriterReel` is integration-only where it talks to
 /// `AVAssetWriter` — but the one decision it *does* make on its own is

@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Pure-value coverage for `InjectedDylibs` — the contents of a
 /// simulator's `DYLD_INSERT_LIBRARIES`.

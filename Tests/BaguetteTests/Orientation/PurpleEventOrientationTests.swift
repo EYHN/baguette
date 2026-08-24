@@ -1,7 +1,7 @@
 import Foundation
 import Mockable
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// A `SimDevice` stand-in that answers `lookup:error:` the way
 /// CoreSimulator does for a device that isn't booted: no port, and an

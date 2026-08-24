@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Whether a browser's install request may be served at all.
 ///

@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Pure-value coverage for `NetworkSchedule` — how a bandwidth becomes the
 /// two numbers the injected dylib paces a response body with.

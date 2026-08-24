@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Text projections for `baguette plugin list | show | validate`.
 /// The commands themselves are thin shells over these pure functions

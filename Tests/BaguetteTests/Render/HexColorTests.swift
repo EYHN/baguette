@@ -1,6 +1,6 @@
 import Testing
 
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("HexColor")
 struct HexColorTests {

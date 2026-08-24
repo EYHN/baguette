@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `PluginRoot` finds the plugins baguette itself ships — the same
 /// three-step lookup `WebRoot` uses for web assets, and pinned here for
@@ -58,7 +58,7 @@ struct PluginRootTests {
         let tmp = try Self.makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        // A miniature package: <root>/Sources/Baguette/Resources/Plugins
+        // A miniature package: <root>/Sources/BaguetteCore/Resources/Plugins
         // with the executable three levels down in .build/debug.
         let plugins = tmp.appendingPathComponent(PluginRoot.sourceTreePath)
         try FileManager.default.createDirectory(at: plugins, withIntermediateDirectories: true)
@@ -112,7 +112,7 @@ struct PluginRootTests {
         defer { try? FileManager.default.removeItem(at: tmp) }
         // Right name, not a bundle.
         try Data("not a bundle".utf8)
-            .write(to: tmp.appendingPathComponent("Baguette_Baguette.bundle"))
+            .write(to: tmp.appendingPathComponent("Baguette_BaguetteCore.bundle"))
 
         #expect(PluginRoot.sidecarRoot(nextTo: tmp) == nil)
     }
@@ -124,7 +124,7 @@ struct PluginRootTests {
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let resources = tmp
-            .appendingPathComponent("Baguette_Baguette.bundle")
+            .appendingPathComponent("Baguette_BaguetteCore.bundle")
             .appendingPathComponent("Contents/Resources")
         try FileManager.default.createDirectory(
             at: resources.appendingPathComponent(PluginRoot.bundleDirectoryName),
@@ -142,7 +142,7 @@ struct PluginRootTests {
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         try FileManager.default.createDirectory(
-            at: tmp.appendingPathComponent("Baguette_Baguette.bundle/Contents/Resources"),
+            at: tmp.appendingPathComponent("Baguette_BaguetteCore.bundle/Contents/Resources"),
             withIntermediateDirectories: true
         )
 

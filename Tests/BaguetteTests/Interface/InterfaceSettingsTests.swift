@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// The three settings `xcrun simctl ui <udid> …` exposes — appearance,
 /// increase-contrast and content size.

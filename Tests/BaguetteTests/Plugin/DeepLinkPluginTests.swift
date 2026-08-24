@@ -1,12 +1,12 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// The deep-link plugin baguette publishes, parsed exactly as an
 /// installed copy would be.
 ///
 /// It ships in this repo's own bakery (`baguette.json` → `plugins/`)
-/// rather than in `Sources/Baguette/Resources/Plugins/`, which is what
+/// rather than in `Sources/BaguetteCore/Resources/Plugins/`, which is what
 /// makes the a11y audit arrive bundled. That's deliberate: it's an
 /// official plugin you still choose to install. The cost of that choice
 /// is that nothing in the build would notice a manifest that stopped

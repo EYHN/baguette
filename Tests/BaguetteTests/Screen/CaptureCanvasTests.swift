@@ -3,7 +3,7 @@ import Foundation
 import CoreGraphics
 import CoreVideo
 import ImageIO
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `CaptureCanvas` is the CoreGraphics half of the capture-size
 /// vocabulary: it takes the frame baguette grabbed and re-lays it onto

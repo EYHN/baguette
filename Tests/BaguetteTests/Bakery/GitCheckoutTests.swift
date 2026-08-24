@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Orchestration coverage for `GitCheckout` — argv assembly, the
 /// non-interactive / no-submodule safety flags, and the

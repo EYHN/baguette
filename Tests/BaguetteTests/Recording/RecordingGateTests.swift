@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `baguette record` ends a take for one of two reasons — the user
 /// pressed Ctrl-C, or `--duration` ran out — and they arrive on two

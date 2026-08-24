@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("Device3DStreamOptions")
 struct Device3DStreamOptionsTests {
