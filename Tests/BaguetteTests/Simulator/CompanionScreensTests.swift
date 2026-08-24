@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Baguette
+@testable import BaguetteCore
 
 /// The extra screens a simulator can show beside its own glass: the
 /// CarPlay external display, and the Apple Watch paired to it. The

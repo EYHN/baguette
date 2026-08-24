@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("LiveChromes")
 struct LiveChromesTests {
@@ -44,6 +44,44 @@ struct LiveChromesTests {
         #expect(assets?.composite == png)
     }
 
+    @Test func `assets prefers exact-size slices over a baked composite`() throws {
+        let store = makeChromeStore()
+        let rasterizer = MockPDFRasterizer()
+        let composed = ChromeImage(
+            data: Data("EXACT-SIZE-PNG".utf8),
+            size: Size(width: 438, height: 910)
+        )
+
+        given(store).profilePlistData(deviceName: .value("iPhone 17 Pro"))
+            .willReturn(Self.makePlist(
+                chromeIdentifier: "com.apple.dt.devicekit.chrome.phone11",
+                width: 1_206,
+                height: 2_622,
+                scale: 3
+            ))
+        given(store).chromeJSONData(chromeIdentifier: .value("phone11"))
+            .willReturn(Self.fixtureChromeJSONCompositeAndSlice)
+        for (name, payload) in Self.phoneSlicePDFNamesAndPayloads {
+            given(store).chromeAssetPDF(
+                chromeIdentifier: .value("phone11"),
+                imageName: .value(name)
+            ).willReturn(Data(payload.utf8))
+        }
+        given(rasterizer).compose9Slice(
+            pdfs: .any,
+            insets: .any,
+            innerSize: .value(Size(width: 402, height: 874))
+        ).willReturn(composed)
+
+        let chromes = LiveChromes(store: store, rasterizer: rasterizer)
+        let assets = try #require(
+            chromes.assets(forDeviceName: "iPhone 17 Pro")
+        )
+
+        #expect(assets.composite == composed)
+        verify(rasterizer).rasterize(pdfData: .any).called(0)
+    }
+
     @Test func `assets caches by chrome identifier across repeated lookups`() throws {
         let store = makeChromeStore()
         let rasterizer = MockPDFRasterizer()
@@ -66,6 +104,69 @@ struct LiveChromesTests {
         verify(rasterizer).rasterize(pdfData: .any).called(1)
         // The plist resolves the identifier, so it's read for every call.
         verify(store).profilePlistData(deviceName: .any).called(3)
+    }
+
+    @Test func `assets caches one composition per logical screen size`() throws {
+        let store = makeChromeStore()
+        let rasterizer = MockPDFRasterizer()
+        let compact = ChromeImage(
+            data: Data("COMPACT".utf8),
+            size: Size(width: 438, height: 910)
+        )
+        let large = ChromeImage(
+            data: Data("LARGE".utf8),
+            size: Size(width: 476, height: 992)
+        )
+
+        given(store).profilePlistData(deviceName: .value("Compact Phone"))
+            .willReturn(Self.makePlist(
+                chromeIdentifier: "com.apple.dt.devicekit.chrome.phone11",
+                width: 1_206,
+                height: 2_622,
+                scale: 3
+            ))
+        given(store).profilePlistData(deviceName: .value("Large Phone"))
+            .willReturn(Self.makePlist(
+                chromeIdentifier: "com.apple.dt.devicekit.chrome.phone11",
+                width: 1_320,
+                height: 2_868,
+                scale: 3
+            ))
+        given(store).chromeJSONData(chromeIdentifier: .value("phone11"))
+            .willReturn(Self.fixtureChromeJSONCompositeAndSlice)
+        for (name, payload) in Self.phoneSlicePDFNamesAndPayloads {
+            given(store).chromeAssetPDF(
+                chromeIdentifier: .value("phone11"),
+                imageName: .value(name)
+            ).willReturn(Data(payload.utf8))
+        }
+        given(rasterizer).compose9Slice(
+            pdfs: .any,
+            insets: .any,
+            innerSize: .value(Size(width: 402, height: 874))
+        ).willReturn(compact)
+        given(rasterizer).compose9Slice(
+            pdfs: .any,
+            insets: .any,
+            innerSize: .value(Size(width: 440, height: 956))
+        ).willReturn(large)
+
+        let chromes = LiveChromes(store: store, rasterizer: rasterizer)
+        #expect(
+            chromes.assets(forDeviceName: "Compact Phone")?.composite == compact
+        )
+        #expect(
+            chromes.assets(forDeviceName: "Large Phone")?.composite == large
+        )
+        #expect(
+            chromes.assets(forDeviceName: "Compact Phone")?.composite == compact
+        )
+
+        verify(rasterizer).compose9Slice(
+            pdfs: .any,
+            insets: .any,
+            innerSize: .any
+        ).called(2)
     }
 
     // MARK: - degraded paths — every step gives nil cleanly
@@ -582,6 +683,27 @@ private extension LiveChromesTests {
     }
     """#.utf8)
 
+    static let fixtureChromeJSONCompositeAndSlice: Data = Data(#"""
+    {
+      "identifier": "com.apple.dt.devicekit.chrome.phone11",
+      "images": {
+        "composite": "PhoneComposite",
+        "topLeft": "PhoneTL",
+        "top": "PhoneTop",
+        "topRight": "PhoneTR",
+        "right": "PhoneRight",
+        "bottomRight": "PhoneBR",
+        "bottom": "PhoneBase",
+        "bottomLeft": "PhoneBL",
+        "left": "PhoneLeft",
+        "screen": "Screen",
+        "sizing": { "leftWidth": 18, "rightWidth": 18, "topHeight": 18, "bottomHeight": 18 }
+      },
+      "paths": { "simpleOutsideBorder": { "cornerRadiusX": 80 } },
+      "inputs": []
+    }
+    """#.utf8)
+
     /// Map of slice asset name → mock PDF payload, used by the 9-slice
     /// happy-path test to assert the right `imageName` lookups happen
     /// and the right bytes flow into `compose9Slice`. The `Screen` entry
@@ -597,6 +719,17 @@ private extension LiveChromesTests {
         ("iPadBase",  "bottom"),
         ("iPadBL",    "bottomLeft"),
         ("iPadLeft",  "left"),
+    ]
+
+    static let phoneSlicePDFNamesAndPayloads: [(String, String)] = [
+        ("PhoneTL",    "topLeft"),
+        ("PhoneTop",   "top"),
+        ("PhoneTR",    "topRight"),
+        ("PhoneRight", "right"),
+        ("PhoneBR",    "bottomRight"),
+        ("PhoneBase",  "bottom"),
+        ("PhoneBL",    "bottomLeft"),
+        ("PhoneLeft",  "left"),
     ]
 
     /// watch4-shape fixture exposing the new authoritative source for

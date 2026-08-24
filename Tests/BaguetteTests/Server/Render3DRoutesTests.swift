@@ -1,7 +1,7 @@
 import Foundation
 import Mockable
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("Server 3D render routes")
 struct Render3DRoutesTests {

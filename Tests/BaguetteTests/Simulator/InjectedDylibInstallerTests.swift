@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Coverage for the install layout shared by every dylib baguette injects.
 ///

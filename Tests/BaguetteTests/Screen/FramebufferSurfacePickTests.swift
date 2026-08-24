@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Given a display binding and live surface sizes, pick which plane to
 /// emit. CarPlay must never fall back to the phone framebuffer.

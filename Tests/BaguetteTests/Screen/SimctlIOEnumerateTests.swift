@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `simctl io enumerate` Connected Screens is the live topology:
 /// creatable CarPlay (101) is ignored until a TVOut/CarPlay screen

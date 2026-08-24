@@ -6,5 +6,5 @@ DerivedData/
 *.xcworkspace
 /Baguette
 # Build intermediates — `build.sh` stages the real copies into
-# Sources/Baguette/Resources/, which are the tracked ones.
+# Sources/BaguetteCore/Resources/, which are the tracked ones.
 /Injected/*/*.dylib
