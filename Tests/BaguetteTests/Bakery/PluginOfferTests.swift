@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// What a trusted bakery is offering right now, and whether you
 /// already have it. Pure join — the browser's plugin shelf renders

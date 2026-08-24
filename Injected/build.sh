@@ -32,6 +32,6 @@ for script in */build.sh; do
     fi
 
     # Staged where Package.swift `.copy`s it from.
-    mkdir -p "../Sources/Baguette/Resources/$name"
-    cp -f "$dylib" "../Sources/Baguette/Resources/$name/"
+    mkdir -p "../Sources/BaguetteCore/Resources/$name"
+    cp -f "$dylib" "../Sources/BaguetteCore/Resources/$name/"
 done

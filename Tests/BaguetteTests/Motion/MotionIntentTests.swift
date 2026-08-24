@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Coverage for `MotionIntent` — the payload baguette publishes into the
 /// simulator and the injected dylib reads back.

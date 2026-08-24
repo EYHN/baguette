@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `HostSubprocess` is the one file in the spawn path that talks to the
 /// real OS, so everything else is unit-tested against `MockSubprocess`

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Framebuffer port default size is read only from accessors the port
 /// actually exposes — missing KVC keys must return nil, not trap.

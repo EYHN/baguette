@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// The icon set exists twice — `PluginIcon` here, the `ICONS` map in
 /// `sim-plugins.js` — and until this suite nothing checked they agreed.
@@ -26,7 +26,7 @@ struct PluginIconParityTests {
             .deletingLastPathComponent()   // …/BaguetteTests
             .deletingLastPathComponent()   // …/Tests
             .deletingLastPathComponent()   // repo root
-            .appendingPathComponent("Sources/Baguette/Resources/Web/sim-plugins.js")
+            .appendingPathComponent("Sources/BaguetteCore/Resources/Web/sim-plugins.js")
     }
 
     /// The keys of the `ICONS` object literal in `sim-plugins.js`.
