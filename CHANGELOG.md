@@ -28,9 +28,11 @@ For releases prior to this changelog, see the
   digitizer-edge translation. `baguette tap --edge` and the JS SDK's
   `screen.tap(point, { edge })` carry it too. An absent `edge` is
   still an interior touch; an unrecognised one is now rejected on
-  every surface (`invalid edge: expected left | top | right |
-  bottom`) instead of quietly landing as interior — which also
-  tightens `touch1-*`, where a typo used to pass silently.
+  every surface instead of quietly landing as interior — the wire
+  answers `invalid edge: expected left | top | right | bottom`, the
+  CLI `Unknown edge: … (allowed: …)`, the shape its other options
+  already use. That also tightens `touch1-*`, where a typo used to
+  pass silently.
 
 ---
 

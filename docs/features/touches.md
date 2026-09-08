@@ -26,7 +26,7 @@ two `IndigoHIDMessageForButton` presses ~150 ms apart — so it lives in
 | Surface | How it arrives |
 |---------|----------------|
 | **CLI** | `baguette tap --x … --y …`, `baguette swipe …`, `baguette press --button swipe-to-app-switcher / swipe-to-home / pull-down-to-lock-screen / pull-down-to-notification-center` (the canned `app-switcher` button uses the home-press recipe — see [buttons.md](buttons.md)) |
-| **Wire** | `{"type":"tap"}` / `{"type":"swipe"}` / `{"type":"touch1-down","edge":"bottom",…}` on `baguette serve` WS or `baguette input` stdin. `edge` accepts `bottom` (home / app switcher) or `top` (lock screen / notification center), and rides `tap` as well as `touch1-*`. |
+| **Wire** | `{"type":"tap"}` / `{"type":"swipe"}` / `{"type":"touch1-down","edge":"bottom",…}` on `baguette serve` WS or `baguette input` stdin. `edge` accepts `bottom` (home / app switcher), `top` (lock screen / notification center), `left` or `right`, and rides `tap` as well as `touch1-*`. |
 | **Browser** | Click / drag on the focus-mode canvas. Drag from the bottom 7 % streams `touch1-*` with `edge: 'bottom'` (iOS animates the home / app-switcher preview live); drag from the top 7 % streams with `edge: 'top'` (iOS pulls the lock-screen cover sheet from a top-left origin or Notification Center from a top-right origin). |
 
 Everything ends up in `Input.touch1(phase:at:size:edge:)` (streaming)

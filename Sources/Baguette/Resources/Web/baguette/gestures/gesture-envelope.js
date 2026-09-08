@@ -6,11 +6,18 @@
   'use strict';
 
   class GestureEnvelope {
+    /** Only an absent edge means an interior touch, so anything else
+     *  the caller named — `''` included — goes on the wire for the
+     *  server to reject rather than being demoted here in silence. */
+    static named(edge) {
+      return edge !== undefined && edge !== null;
+    }
+
     /** `edge` is the same screen-edge hint `touch` carries; omitted
      *  for ordinary interior taps. */
     static tap({ x, y, duration = 0.05, edge }, size) {
       const envelope = { type: 'tap', x, y, duration, ...size };
-      if (edge) envelope.edge = edge;
+      if (GestureEnvelope.named(edge)) envelope.edge = edge;
       return envelope;
     }
 
@@ -33,7 +40,7 @@
     static touch(phase, fingers, opts, size) {
       if (fingers.length === 1) {
         const envelope = { type: `touch1-${phase}`, x: fingers[0].x, y: fingers[0].y, ...size };
-        if (opts && opts.edge) envelope.edge = opts.edge;
+        if (opts && GestureEnvelope.named(opts.edge)) envelope.edge = opts.edge;
         return envelope;
       }
       if (fingers.length === 2) {
