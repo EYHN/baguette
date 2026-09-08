@@ -26,7 +26,7 @@ struct InputRouteTests {
 
     @Test func `a tap envelope reaches the input as a tap`() async throws {
         let input = MockInput()
-        given(input).tap(at: .any, size: .any, duration: .any).willReturn(true)
+        given(input).tap(at: .any, size: .any, duration: .any, edge: .any).willReturn(true)
 
         let outcome = await Server.dispatchInput(
             udid: "U",
@@ -34,7 +34,7 @@ struct InputRouteTests {
             simulators: Self.simulators(input: input)
         )
         guard case .ok = outcome else { Issue.record("expected .ok, got \(outcome)"); return }
-        verify(input).tap(at: .value(Point(x: 100, y: 200)), size: .any, duration: .any).called(1)
+        verify(input).tap(at: .value(Point(x: 100, y: 200)), size: .any, duration: .any, edge: .any).called(1)
     }
 
     @Test func `an unknown device is reported`() async throws {

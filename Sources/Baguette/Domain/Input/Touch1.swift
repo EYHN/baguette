@@ -25,7 +25,7 @@ struct Touch1: Gesture, Equatable {
             phase: try Field.requiredPhase(dict),
             at: try Field.requiredPoint(dict, "x", "y"),
             size: try Field.requiredSize(dict),
-            edge: (dict["edge"] as? String).flatMap(DeviceEdge.init(rawValue:))
+            edge: try Field.optionalEdge(dict)
         )
     }
 

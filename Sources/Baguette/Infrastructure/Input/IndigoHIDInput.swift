@@ -145,7 +145,7 @@ final class IndigoHIDInput: Input, @unchecked Sendable {
 
     // MARK: - Input protocol
 
-    func tap(at point: Point, size: Size, duration: Double) -> Bool {
+    func tap(at point: Point, size: Size, duration: Double, edge: DeviceEdge?) -> Bool {
         guard let c = ensureWarm() else { return false }
         // New path: build IOHIDEvent digitizer parent + finger
         // child, run through trackpad-from-HIDEventRef wrapper,
@@ -159,7 +159,8 @@ final class IndigoHIDInput: Input, @unchecked Sendable {
         return IOHIDDigitizerDispatch.tap(
             point: normalised,
             holdSeconds: duration > 0 ? duration : 0.05,
-            edge: .none, identifier: nextTouchIdentifier(),
+            edge: IOHIDDigitizerDispatch.Edge.from(edge),
+            identifier: nextTouchIdentifier(),
             target: touchTarget, on: c
         )
     }
@@ -198,17 +199,9 @@ final class IndigoHIDInput: Input, @unchecked Sendable {
         // until `up`.
         if phase == .down { stickyTouchIdentifier = nextTouchIdentifier() }
         let id = stickyTouchIdentifier ?? nextTouchIdentifier()
-        let dispatchEdge: IOHIDDigitizerDispatch.Edge
-        switch edge {
-        case .left:   dispatchEdge = .left
-        case .top:    dispatchEdge = .top
-        case .right:  dispatchEdge = .right
-        case .bottom: dispatchEdge = .bottom
-        case nil:     dispatchEdge = .none
-        }
         return IOHIDDigitizerDispatch.send(
             point: normalised, identifier: id,
-            phase: dispatchPhase, edge: dispatchEdge,
+            phase: dispatchPhase, edge: IOHIDDigitizerDispatch.Edge.from(edge),
             target: touchTarget, on: c
         )
     }

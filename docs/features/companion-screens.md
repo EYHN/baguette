@@ -193,6 +193,38 @@ for the device, so a broken command line reports itself rather than the
 udid. The watch needs no flag: it is its own udid, so the ordinary
 commands point at it.
 
+### The map template's nav bar and the edge flag
+
+Reported in [#75](https://github.com/tddworks/baguette/issues/75):
+`CPMapTemplate`'s nav-bar `CPBarButton`s sit in the top band of the
+head unit and swallowed a plain wire `tap` — the handler never fired
+and the app only ever saw the bar auto-hiding — while a finger on
+the browser canvas at the same point pressed the button. Everything
+else on the plane (home-screen icons, the map itself, a presented
+`CPListTemplate` / `CPGridTemplate` / `CPTripPreviewTemplate`) took
+the unflagged tap fine, which made it look like wrong coordinates
+when it wasn't.
+
+The two paths differed by one thing. The browser's touch source
+classifies a point at `y / height ≤ 0.15` as the top band and
+streams `touch1-*` with `edge: "top"`; `tap` had no way to carry
+that hint, so its message went out with the edge bytes zeroed. It
+can carry it now:
+
+```sh
+printf '{"type":"tap","x":742,"y":44,"width":800,"height":480,"edge":"top"}\n' \
+  | baguette input --udid <UDID> --display carplay
+```
+
+That makes the wire `tap` byte-for-byte what the browser sent. Whether
+the flag is what CarPlay keys on has not been confirmed on a head
+unit — it is the measured difference, not a measured cause. The bar
+auto-hides, so expect the first tap to wake it and a second ~700 ms
+later to land, as it did in the browser. If a plain mouse click on
+the same button in the web UI *also* works, the flag is not the
+explanation: the mouse source's band is `0.07`, so that click ships
+an unflagged `tap`.
+
 ## Driving the watch
 
 A watch pane has no bezel chrome to hang overlay buttons off, so the two

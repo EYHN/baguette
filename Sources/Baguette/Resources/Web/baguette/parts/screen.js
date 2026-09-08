@@ -78,7 +78,11 @@
     // --- domain verbs ---
 
     tap(point, opts) {
-      this.transport.tap({ x: point.x, y: point.y, duration: opts && opts.duration });
+      this.transport.tap({
+        x: point.x, y: point.y,
+        duration: opts && opts.duration,
+        edge: opts && opts.edge,
+      });
     }
 
     swipe({ from, to, duration }) {

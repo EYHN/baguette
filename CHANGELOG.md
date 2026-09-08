@@ -10,6 +10,30 @@ For releases prior to this changelog, see the
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `tap` can name the screen edge it lands on** (`{"type":"tap",
+  …,"edge":"top"}`), closing the last gap between the one-shot tap
+  and the streaming `touch1-*` form. They now build identical
+  messages for the same point. Surfaced by CarPlay
+  ([#75](https://github.com/tddworks/baguette/issues/75)):
+  `CPMapTemplate`'s nav-bar `CPBarButton`s ignored a wire `tap` while
+  the same button responded to a finger on the browser canvas. The
+  browser's touch source classifies anything in the top 15 % as
+  `edge: "top"` and streams it; `tap` hardcoded no edge, and that
+  bitmask was the only difference between the two messages. Whether
+  it is what CarPlay keys on is not yet confirmed on a head unit —
+  the CLI can now send exactly what the browser did, which is the
+  measured gap. `Tap` and `Touch1` share one `DeviceEdge` →
+  digitizer-edge translation. `baguette tap --edge` and the JS SDK's
+  `screen.tap(point, { edge })` carry it too. An absent `edge` is
+  still an interior touch; an unrecognised one is now rejected on
+  every surface instead of quietly landing as interior — the wire
+  answers `invalid edge: expected left | top | right | bottom`, the
+  CLI `Unknown edge: … (allowed: …)`, the shape its other options
+  already use. That also tightens `touch1-*`, where a typo used to
+  pass silently.
+
 ---
 
 ## [0.1.97] - 2026-08-31

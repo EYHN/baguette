@@ -54,6 +54,9 @@ struct HIDUsage: Equatable, Hashable, Sendable {
 /// `IndigoHIDMessageForMouseNSEvent`'s 7-arg signature.
 public enum DeviceEdge: String, Sendable, Equatable, Hashable, CaseIterable {
     case left, top, right, bottom
+
+    /// The accepted spellings, for error messages and `--help`.
+    static let allowed = allCases.map(\.rawValue).joined(separator: " | ")
 }
 
 /// Hardware buttons routable via the host-HID path on iOS 26.4.
