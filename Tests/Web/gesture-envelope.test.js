@@ -26,6 +26,18 @@ test('tap honors an explicit duration', () => {
   assert.equal(envelope.duration, 0.2);
 });
 
+test('tap omits the edge key unless the caller names one', () => {
+  const GE = GestureEnvelope();
+  const envelope = GE.tap({ x: 10, y: 20 }, { width: 393, height: 852 });
+  assert.equal('edge' in envelope, false);
+});
+
+test('tap tags the edge when the caller supplies one', () => {
+  const GE = GestureEnvelope();
+  const envelope = GE.tap({ x: 742, y: 44, edge: 'top' }, { width: 800, height: 480 });
+  assert.equal(envelope.edge, 'top');
+});
+
 test('swipe defaults duration to 250ms and maps from/to onto startX/Y, endX/Y', () => {
   const GE = GestureEnvelope();
   const envelope = GE.swipe({ from: { x: 1, y: 2 }, to: { x: 3, y: 4 } }, { width: 100, height: 200 });

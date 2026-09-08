@@ -35,6 +35,19 @@ enum IOHIDDigitizerDispatch {
     enum Edge {
         case none, left, top, right, bottom
 
+        /// The wire's `DeviceEdge` in this vocabulary; `nil` is an
+        /// interior touch. One translation for every caller, so a
+        /// `tap` and a `touch1` at the same point cannot disagree.
+        static func from(_ edge: DeviceEdge?) -> Edge {
+            switch edge {
+            case .left:   return .left
+            case .top:    return .top
+            case .right:  return .right
+            case .bottom: return .bottom
+            case nil:     return .none
+            }
+        }
+
         var bit: UInt8 {
             switch self {
             case .none:   return 0x00

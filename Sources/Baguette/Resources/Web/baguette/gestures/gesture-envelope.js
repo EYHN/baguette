@@ -6,8 +6,12 @@
   'use strict';
 
   class GestureEnvelope {
-    static tap({ x, y, duration = 0.05 }, size) {
-      return { type: 'tap', x, y, duration, ...size };
+    /** `edge` is the same screen-edge hint `touch` carries; omitted
+     *  for ordinary interior taps. */
+    static tap({ x, y, duration = 0.05, edge }, size) {
+      const envelope = { type: 'tap', x, y, duration, ...size };
+      if (edge) envelope.edge = edge;
+      return envelope;
     }
 
     static swipe({ from, to, duration = 0.25 }, size) {

@@ -30,10 +30,21 @@ struct TapCommand: ParsableCommand {
     @Option var width: Double
     @Option var height: Double
     @Option(help: "Hold duration in seconds") var duration: Double = 0.05
+    @Option(help: "Screen edge the tap lands on: \(DeviceEdge.allowed). Omit for an interior tap.")
+    var edge: String?
 
     func run() {
+        var landing: DeviceEdge?
+        if let edge {
+            guard let parsed = DeviceEdge(rawValue: edge) else {
+                log("Unknown edge: \(edge) (allowed: \(DeviceEdge.allowed))")
+                Foundation.exit(1)
+            }
+            landing = parsed
+        }
         let sim = resolve(udid: options.udid, deviceSet: options.deviceSet)
-        let gesture = Tap(at: Point(x: x, y: y), size: Size(width: width, height: height), duration: duration)
+        let gesture = Tap(at: Point(x: x, y: y), size: Size(width: width, height: height),
+                          duration: duration, edge: landing)
         runOrExit(gesture.execute(on: sim.input()), action: "tap")
     }
 }

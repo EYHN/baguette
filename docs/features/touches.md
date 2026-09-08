@@ -26,7 +26,7 @@ two `IndigoHIDMessageForButton` presses ~150 ms apart — so it lives in
 | Surface | How it arrives |
 |---------|----------------|
 | **CLI** | `baguette tap --x … --y …`, `baguette swipe …`, `baguette press --button swipe-to-app-switcher / swipe-to-home / pull-down-to-lock-screen / pull-down-to-notification-center` (the canned `app-switcher` button uses the home-press recipe — see [buttons.md](buttons.md)) |
-| **Wire** | `{"type":"tap"}` / `{"type":"swipe"}` / `{"type":"touch1-down","edge":"bottom",…}` on `baguette serve` WS or `baguette input` stdin. `edge` accepts `bottom` (home / app switcher) or `top` (lock screen / notification center). |
+| **Wire** | `{"type":"tap"}` / `{"type":"swipe"}` / `{"type":"touch1-down","edge":"bottom",…}` on `baguette serve` WS or `baguette input` stdin. `edge` accepts `bottom` (home / app switcher) or `top` (lock screen / notification center), and rides `tap` as well as `touch1-*`. |
 | **Browser** | Click / drag on the focus-mode canvas. Drag from the bottom 7 % streams `touch1-*` with `edge: 'bottom'` (iOS animates the home / app-switcher preview live); drag from the top 7 % streams with `edge: 'top'` (iOS pulls the lock-screen cover sheet from a top-left origin or Notification Center from a top-right origin). |
 
 Everything ends up in `Input.touch1(phase:at:size:edge:)` (streaming)
@@ -200,6 +200,22 @@ canned playback on release.
   "duration": 0.25
 }
 ```
+
+### One-shot tap with edge
+
+```json
+{ "type": "tap", "x": 742, "y": 44, "width": 800, "height": 480, "edge": "top" }
+```
+
+Same hint, same bytes as the streaming form below — a `tap` and a
+`touch1-down`/`touch1-up` pair at the same point now produce
+identical messages. Reach for it when a control sits inside an
+edge band and a browser touch works where an unflagged wire tap
+does not; the CarPlay map template's nav bar is the case that
+surfaced the gap ([companion-screens.md](companion-screens.md)).
+An unrecognised `edge` is rejected (`invalid edge: expected left |
+top | right | bottom`) rather than quietly demoted to an interior
+touch.
 
 ### Streaming touch1 with edge
 

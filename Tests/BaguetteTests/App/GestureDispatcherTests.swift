@@ -7,7 +7,7 @@ struct GestureDispatcherTests {
 
     @Test func `dispatches a valid tap and returns ok=true`() {
         let input = MockInput()
-        given(input).tap(at: .any, size: .any, duration: .any).willReturn(true)
+        given(input).tap(at: .any, size: .any, duration: .any, edge: .any).willReturn(true)
         let dispatcher = GestureDispatcher(input: input)
 
         let ack = dispatcher.dispatch(line: #"{"type":"tap","x":1,"y":2,"width":100,"height":200}"#)
@@ -17,12 +17,30 @@ struct GestureDispatcherTests {
 
     @Test func `propagates the input surface's false return`() {
         let input = MockInput()
-        given(input).tap(at: .any, size: .any, duration: .any).willReturn(false)
+        given(input).tap(at: .any, size: .any, duration: .any, edge: .any).willReturn(false)
         let dispatcher = GestureDispatcher(input: input)
 
         let ack = dispatcher.dispatch(line: #"{"type":"tap","x":1,"y":2,"width":1,"height":1}"#)
 
         #expect(ack == #"{"ok":false}"#)
+    }
+
+    // The exact stdin line from issue #75 — a CarPlay nav-bar button
+    // sits in the top band, and the edge hint has to survive the whole
+    // way from the wire to the input surface for it to be pressed.
+    @Test func `carries a tap's edge hint through to the input surface`() {
+        let input = MockInput()
+        given(input).tap(at: .any, size: .any, duration: .any, edge: .any).willReturn(true)
+        let dispatcher = GestureDispatcher(input: input)
+
+        let ack = dispatcher.dispatch(
+            line: #"{"type":"tap","x":742,"y":44,"width":800,"height":480,"edge":"top"}"#
+        )
+
+        #expect(ack == #"{"ok":true}"#)
+        verify(input).tap(
+            at: .value(Point(x: 742, y: 44)), size: .any, duration: .any, edge: .value(.top)
+        ).called(1)
     }
 
     @Test func `returns parse error on missing field`() {

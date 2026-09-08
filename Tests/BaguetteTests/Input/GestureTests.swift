@@ -22,14 +22,58 @@ struct TapTests {
 
     @Test func `executes against the input surface`() {
         let input = MockInput()
-        given(input).tap(at: .any, size: .any, duration: .any).willReturn(true)
+        given(input).tap(at: .any, size: .any, duration: .any, edge: .any).willReturn(true)
         let tap = Tap(at: Point(x: 5, y: 6), size: Size(width: 100, height: 200), duration: 0.07)
 
         #expect(tap.execute(on: input))
         verify(input).tap(
             at: .value(Point(x: 5, y: 6)),
             size: .value(Size(width: 100, height: 200)),
-            duration: .value(0.07)
+            duration: .value(0.07),
+            edge: .value(nil)
+        ).called(1)
+    }
+
+    // A one-shot tap can name the screen edge it starts on, exactly
+    // like the streaming touch path already does. Without it the CLI
+    // could not express what the browser's touch source sends for the
+    // same point — see issue #75.
+    @Test func `parses an optional edge hint`() throws {
+        let gesture = try Tap.parse([
+            "x": 742, "y": 44, "width": 800, "height": 480, "edge": "top"
+        ])
+        #expect(gesture == Tap(at: Point(x: 742, y: 44),
+                               size: Size(width: 800, height: 480),
+                               duration: 0.05,
+                               edge: .top))
+    }
+
+    @Test func `leaves the edge hint unset when absent`() throws {
+        #expect(try Tap.parse(["x": 0, "y": 0, "width": 1, "height": 1]).edge == nil)
+    }
+
+    // A typo must not silently become an interior tap — that is the
+    // exact swallowed-tap failure the edge hint exists to cure.
+    @Test func `rejects an unrecognised edge`() {
+        #expect(throws: GestureError.invalidValue("edge", expected: "left | top | right | bottom")) {
+            try Tap.parse(["x": 0, "y": 0, "width": 1, "height": 1, "edge": "Top"])
+        }
+    }
+
+    @Test func `executes with the edge hint passed through`() {
+        let input = MockInput()
+        given(input).tap(at: .any, size: .any, duration: .any, edge: .any).willReturn(true)
+        let tap = Tap(at: Point(x: 742, y: 44),
+                      size: Size(width: 800, height: 480),
+                      duration: 0.05,
+                      edge: .top)
+
+        #expect(tap.execute(on: input))
+        verify(input).tap(
+            at: .value(Point(x: 742, y: 44)),
+            size: .value(Size(width: 800, height: 480)),
+            duration: .value(0.05),
+            edge: .value(.top)
         ).called(1)
     }
 }
@@ -112,6 +156,12 @@ struct Touch1Tests {
                             at: Point(x: 0.5, y: 0.99),
                             size: Size(width: 100, height: 200),
                             edge: .bottom))
+    }
+
+    @Test func `rejects an unrecognised edge`() {
+        #expect(throws: GestureError.invalidValue("edge", expected: "left | top | right | bottom")) {
+            try Touch1.parse(["phase": "down", "x": 0, "y": 0, "width": 1, "height": 1, "edge": "Bottom"])
+        }
     }
 
     @Test func `executes with edge passed through`() {

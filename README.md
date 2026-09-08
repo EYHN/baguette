@@ -298,6 +298,7 @@ baguette <command> [options]
   # invocation. Coordinates are in DEVICE POINTS; `width` / `height`
   # are the simulator's screen size in points.
   tap        --udid … --x … --y … --width … --height … [--duration 0.05]
+                                             [--edge left|top|right|bottom]
   double-tap --udid … --x … --y … --width … --height …
                                              [--interval 0.05] [--duration 0.08]
   swipe      --udid … --startX … --startY … --endX … --endY …
@@ -553,6 +554,12 @@ on stdout, one ack per line.
 {"type":"tap",   "x":219, "y":478, "width":438, "height":954, "duration":0.05}
 {"type":"swipe", "startX":219,"startY":760, "endX":219,"endY":190,
                  "width":438,"height":954, "duration":0.3}
+
+// A tap takes the same optional `edge` as the streaming form below,
+// so it builds the same message a browser touch in an edge band
+// sends — the CarPlay map template's nav bar took one and not the
+// other (#75). An unrecognised value is an error, not an interior tap.
+{"type":"tap",   "x":742, "y":44, "width":800, "height":480, "edge":"top"}
 
 // 1-finger streaming (phase-driven). Optional `edge: "bottom"|"top"|
 // "left"|"right"` flags the stream as a screen-edge system gesture —

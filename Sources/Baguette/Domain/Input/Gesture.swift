@@ -67,6 +67,17 @@ enum Field {
         Size(width: try requiredDouble(dict, "width"), height: try requiredDouble(dict, "height"))
     }
 
+    /// Absent means an interior touch. Present but unrecognised is an
+    /// error, not a quiet demotion to interior — a typo would otherwise
+    /// reproduce the very swallowed-tap the hint exists to cure.
+    static func optionalEdge(_ dict: [String: Any]) throws -> DeviceEdge? {
+        guard let raw = dict["edge"] else { return nil }
+        guard let text = raw as? String, let edge = DeviceEdge(rawValue: text) else {
+            throw GestureError.invalidValue("edge", expected: DeviceEdge.allowed)
+        }
+        return edge
+    }
+
     static func requiredPhase(_ dict: [String: Any]) throws -> GesturePhase {
         let raw = try requiredString(dict, "phase")
         guard let phase = GesturePhase(rawValue: raw) else {

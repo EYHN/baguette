@@ -6,7 +6,10 @@ import Mockable
 /// into private SimulatorKit calls; tests substitute `MockInput`.
 @Mockable
 protocol Input: Sendable {
-    func tap(at point: Point, size: Size, duration: Double) -> Bool
+    /// One-shot tap. `edge` flags the screen edge the finger lands on
+    /// — the same hint `touch1` carries, and the only difference in
+    /// the message a streamed touch and a `tap` build for one point.
+    func tap(at point: Point, size: Size, duration: Double, edge: DeviceEdge?) -> Bool
     func swipe(from start: Point, to end: Point, size: Size, duration: Double) -> Bool
     func touch1(phase: GesturePhase, at point: Point, size: Size, edge: DeviceEdge?) -> Bool
     func touch2(phase: GesturePhase, first: Point, second: Point, size: Size) -> Bool

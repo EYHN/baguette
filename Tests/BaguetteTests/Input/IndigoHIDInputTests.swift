@@ -14,7 +14,8 @@ struct IndigoHIDInputErrorTests {
         let ok = input.tap(
             at: Point(x: 10, y: 20),
             size: Size(width: 100, height: 200),
-            duration: 0.05
+            duration: 0.05,
+            edge: nil
         )
         #expect(!ok)
     }
