@@ -32,6 +32,26 @@ Headless boot — the CoreSimulator framework spins the device up without
 opening Simulator.app. `boot` is idempotent: an already-booted device
 returns `{"ok":true}`.
 
+Under Xcode 27, `boot` also waits for the boot to finish and, if Device
+Hub has attached to the device, reclaims the input surface (restarts
+backboardd + SpringBoard, ~4 s — nothing is running yet). `--no-heal`
+skips that.
+
+## Reclaiming input from Device Hub — `heal`
+
+```bash
+baguette heal --udid <UDID>
+```
+
+Xcode 27's Device Hub attaches a HID daemon to every booted device, and
+the iOS 27 runtime drops the legacy services baguette drives in
+response — `tap` / `swipe` / `press` ack and land nowhere. `heal`
+clears the daemon's state and restarts backboardd so the services come
+back; **SpringBoard restarts with it, killing running apps** (no
+reboot, ~4 s). Run it when `input` / `serve` print the "Device Hub has
+attached" advisory, or after opening Device Hub on a device you booted
+headlessly. Idempotent: an unshadowed device reports "nothing to heal".
+
 ## Surviving Simulator.app — `lifetime`
 
 ```bash
