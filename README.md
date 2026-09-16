@@ -638,6 +638,13 @@ coordinates by `width` / `height` before serialising.
 
 ### Known limits
 
+- **Xcode 27's Device Hub shadows the input surface.** Its HID daemon
+  attaches to every booted device and the iOS 27 runtime drops the
+  legacy services baguette drives — taps ack and land nowhere, buttons
+  die. `baguette boot` heals this automatically; for a device booted
+  some other way, or one Device Hub was opened on later, run
+  `baguette heal --udid <UDID>` (restarts SpringBoard, ~4 s). See
+  [`docs/features/device-hub.md`](docs/features/device-hub.md).
 - `siri` button — crashes `backboardd` via every known Indigo path;
   refused by the CLI.
 - `key` / `type` cover US-ASCII via W3C `KeyboardEvent.code` strings.

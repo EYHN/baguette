@@ -44,6 +44,7 @@ struct Baguette: AsyncParsableCommand {
             PluginsCommand.self,
             BakeryCommand.self,
             DiagDigitizerTrackpadCommand.self,
+            HealCommand.self,
         ]
     )
 }

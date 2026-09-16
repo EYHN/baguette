@@ -55,6 +55,14 @@ struct InputCommand: AsyncParsableCommand {
         let input = bound.input
         let pasteboard = simulator.pasteboard()
         let dispatcher = GestureDispatcher(input: input)
+        // A long-lived session is worth one guest round-trip up front:
+        // under Xcode 27, Device Hub can leave every gesture below
+        // reporting ok while landing nowhere. Advise; the restart that
+        // fixes it is the user's call mid-session.
+        if await SimctlInputSurface().shadowed(on: simulator),
+           let advisory = DeviceHubAttachment(attached: true).advisory(udid: simulator.udid) {
+            warn(advisory)
+        }
         log("Input session started, reading from stdin")
         while let line = readLine() {
             // `paste` / `copy` need the async pasteboard surface, so

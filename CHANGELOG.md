@@ -12,6 +12,25 @@ For releases prior to this changelog, see the
 
 ### Fixed
 
+- **Input survives Xcode 27's Device Hub.** Device Hub attaches a HID
+  daemon (`dtuhidd`) to every booted simulator, and the iOS 27 runtime
+  answers by tearing down the legacy Indigo services baguette's touches
+  and buttons ride — then never reconnects them (it re-adds a dead
+  `IOHIDServiceRef` and records success). Taps reported `ok` and landed
+  nowhere; hardware buttons died outright
+  ([#77](https://github.com/tddworks/baguette/issues/77)).
+  `baguette boot` now waits for the boot to finish and, if Device Hub
+  attached, reclaims the surface — clears the daemon's notify state and
+  restarts backboardd, ~4 s, nothing is running yet (`--no-heal` opts
+  out; `POST /simulators/<udid>/boot` does the same). `baguette heal
+  --udid <UDID>` does it on demand for a device booted elsewhere or one
+  Device Hub was opened on later (it restarts SpringBoard, so running
+  apps are killed). `baguette input` and `serve` print an advisory
+  naming `heal` when they attach to a shadowed device. The reporter's
+  prime-an-event-first workaround only ever covered touch, and only
+  when it won a ~100 ms race inside backboardd. See
+  [`docs/features/device-hub.md`](docs/features/device-hub.md).
+
 - **A `tap` can name the screen edge it lands on** (`{"type":"tap",
   …,"edge":"top"}`), closing the last gap between the one-shot tap
   and the streaming `touch1-*` form. They now build identical

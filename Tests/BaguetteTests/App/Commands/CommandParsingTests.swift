@@ -24,6 +24,7 @@ struct CommandParsingTests {
             "install", "add-media",
             "openurl", "schemes",
             "plugin", "bakery", "diag-digitizer-trackpad", "lifetime", "interface",
+            "heal",
         ])
     }
 
@@ -95,6 +96,22 @@ struct CommandParsingTests {
     @Test func `boot rejects argv without --udid`() {
         #expect(throws: (any Error).self) {
             try BootCommand.parse([])
+        }
+    }
+
+    @Test func `boot heals the input surface unless told not to`() throws {
+        #expect(try BootCommand.parse(["--udid", "ABC"]).noHeal == false)
+        #expect(try BootCommand.parse(["--udid", "ABC", "--no-heal"]).noHeal == true)
+    }
+
+    // MARK: - heal
+
+    @Test func `heal requires --udid`() throws {
+        let cmd = try HealCommand.parse(["--udid", "ABC"])
+        #expect(cmd.options.udid == "ABC")
+        #expect(HealCommand.configuration.commandName == "heal")
+        #expect(throws: (any Error).self) {
+            try HealCommand.parse([])
         }
     }
 

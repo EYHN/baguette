@@ -184,7 +184,21 @@ struct Server: Sendable {
         // Simulator actions.
         router.post("/simulators/:udid/boot")     { [simulators] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
-            return Self.lifecycle(udid: Self.udidParam(r), simulators: simulators) { try $0.boot() }
+            let response = Self.lifecycle(udid: Self.udidParam(r), simulators: simulators) { try $0.boot() }
+            // Same heal `baguette boot` performs: nothing runs on a
+            // freshly booted device, so reclaiming the input surface
+            // from Device Hub costs nothing. Failure is advisory only —
+            // the boot itself succeeded.
+            if response.status == .ok, let sim = simulators.find(udid: Self.udidParam(r)) {
+                do {
+                    if try await SimctlInputSurface().healAfterBoot(on: sim) == .reclaimed {
+                        log("[serve] \(HealOutcome.reclaimed.summary) for \(sim.udid)")
+                    }
+                } catch {
+                    log("[serve] input surface heal failed for \(sim.udid): \(error)")
+                }
+            }
+            return response
         }
         router.post("/simulators/:udid/shutdown") { [simulators] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
@@ -2638,6 +2652,16 @@ struct Server: Sendable {
                 #"{"ok":false,"error":"\#(jsonEscape(String(describing: error)))"}"#
             ))
             return
+        }
+
+        // One guest round-trip per attach, off the critical path: if
+        // Device Hub has shadowed this device's input surface, every
+        // gesture on this socket will ack and land nowhere. Say so.
+        Task {
+            if await SimctlInputSurface().shadowed(on: sim),
+               let advisory = DeviceHubAttachment(attached: true).advisory(udid: sim.udid) {
+                warn("[serve] \(advisory)")
+            }
         }
 
         let sink = WebSocketFrameSink(outbound: outbound, format: format)

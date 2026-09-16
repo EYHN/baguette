@@ -37,7 +37,10 @@ Most automation jobs follow the same shape:
 baguette list                              # human-readable
 baguette list --json                       # machine-readable: {running, available}
 
-# 2. Boot one if nothing is running.
+# 2. Boot one if nothing is running. Under Xcode 27 this also reclaims
+#    the input surface from Device Hub; if a device was booted some other
+#    way and taps ack but nothing happens, run `baguette heal --udid <UDID>`
+#    (restarts SpringBoard — see references/cli.md).
 baguette boot --udid <UDID>
 
 # 3. Get the screen size — you need this for every gesture.
