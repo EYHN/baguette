@@ -10,6 +10,10 @@ For releases prior to this changelog, see the
 
 ## [Unreleased]
 
+---
+
+## [0.1.98] - 2026-09-16
+
 ### Fixed
 
 - **Input survives Xcode 27's Device Hub.** Device Hub attaches a HID
@@ -1168,7 +1172,8 @@ For releases prior to this changelog, see the
 
 ---
 
-[Unreleased]: https://github.com/tddworks/baguette/compare/v0.1.97...HEAD
+[Unreleased]: https://github.com/tddworks/baguette/compare/v0.1.98...HEAD
+[0.1.98]: https://github.com/tddworks/baguette/compare/v0.1.97...v0.1.98
 [0.1.97]: https://github.com/tddworks/baguette/compare/v0.1.96...v0.1.97
 [0.1.96]: https://github.com/tddworks/baguette/compare/v0.1.95...v0.1.96
 [0.1.95]: https://github.com/tddworks/baguette/compare/v0.1.95...v0.1.95
