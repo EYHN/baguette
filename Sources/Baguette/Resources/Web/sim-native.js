@@ -1144,6 +1144,12 @@
       const frame = document.getElementById('nativeDeviceFrame');
       if (frame) frame.setAttribute('data-foldable', '');
       toggle3D({ fixed: true });
+      // The unfolded panel is landscape-left by the guest's choice and
+      // the cover portrait; the rotate button cycles from there.
+      const start = currentLitPanel === 'secondary' ? 'landscape-left' : 'portrait';
+      currentOrientation = start;
+      orientationIndex = Math.max(0, orientationCycle().indexOf(start));
+      if (render3DPanel) render3DPanel.interfaceOrientation = start;
       return;
     }
     startSession(currentFormat());
@@ -1941,6 +1947,15 @@
       const cycle = orientationCycle();
       orientationIndex = (orientationIndex + 1) % cycle.length;
       const value = cycle[orientationIndex];
+      // A foldable's book turns in 3D; the flat chrome is not shown.
+      if (foldable && render3DPanel) {
+        currentOrientation = value;
+        render3DPanel.setInterfaceOrientation(value);
+        const url = '/simulators/' + encodeURIComponent(udid)
+            + '/orientation?value=' + encodeURIComponent(value);
+        fetch(url, { method: 'POST' }).catch(() => { /* best-effort */ });
+        return;
+      }
       // Mirror the rotation in the UI immediately. The CSS
       // transform on `#nativeDeviceFrame > div` rotates the bezel
       // + canvas as one unit, while the input + overlay wrappers

@@ -207,7 +207,7 @@ struct Render3DRoutesTests {
         let buttons = [ScreenButtonMark(
             id: "power", at: NormalizedPoint(u: 0.9, v: 0.3), control: NormalizedPoint(u: 0.95, v: 0.3))]
 
-        let json = try #require(Server.screenPiecesJSON(pieces, buttons: buttons))
+        let json = try #require(Server.screenPiecesJSON(pieces, buttons: buttons, litPanel: .primary))
         let object = try #require(
             JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
         )
@@ -222,6 +222,7 @@ struct Render3DRoutesTests {
         #expect(marks[0]["id"] as? String == "power")
         #expect(marks[0]["at"] as? [Double] == [0.9, 0.3])
         #expect(marks[0]["control"] as? [Double] == [0.95, 0.3])
+        #expect(object["litPanel"] as? String == "primary")
     }
 }
 

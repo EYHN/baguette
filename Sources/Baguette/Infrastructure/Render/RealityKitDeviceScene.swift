@@ -55,6 +55,9 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private var buttonAnchors: [ScreenButtonAnchor] = []
     private var bodyExtents = Vector3(x: 0, y: 0, z: 0)
     private(set) var screenButtons: [ScreenButtonMark]?
+    var litPanel: IntegratedPanel? {
+        plan.model.definition.scene.fold == nil ? nil : HingeAngle(degrees: hingeDegrees).litPanel
+    }
     private var renderTargets: MetalRenderTargetRing!
     private var metalDevice: (any MTLDevice)!
     private var commandQueue: (any MTLCommandQueue)!

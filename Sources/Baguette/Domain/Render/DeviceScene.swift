@@ -41,4 +41,7 @@ protocol DeviceScene: AnyObject, Sendable {
     /// Where the model's hardware buttons land in the rendered image,
     /// for a model whose definition names them; nil otherwise.
     var screenButtons: [ScreenButtonMark]? { get }
+
+    /// A foldable's lit panel at the current hinge angle; nil on a phone.
+    var litPanel: IntegratedPanel? { get }
 }
