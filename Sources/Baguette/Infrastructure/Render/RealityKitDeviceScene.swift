@@ -46,8 +46,15 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private var coverLocalCorners: ScreenLocalCorners?
     private var hingeDegrees: Double = 180
     private var view = Device3DCamera(rotation: .zero, zoom: 1)
+    /// The guest's interface orientation as the page last named it; nil
+    /// means the usual: the unfolded panel landscape-left, the cover
+    /// portrait.
+    private var interfaceOrientation: DeviceOrientation?
     private(set) var screenQuad: ScreenQuad?
     private(set) var screenPieces: [ScreenPiece]?
+    private var buttonAnchors: [ScreenButtonAnchor] = []
+    private var bodyExtents = Vector3(x: 0, y: 0, z: 0)
+    private(set) var screenButtons: [ScreenButtonMark]?
     private var renderTargets: MetalRenderTargetRing!
     private var metalDevice: (any MTLDevice)!
     private var commandQueue: (any MTLCommandQueue)!
@@ -115,6 +122,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             ) * self.restOrientation
             self.hingeDegrees = hingeDegrees
             self.screenPieces = self.projectedScreenPieces()
+            self.screenButtons = self.projectedScreenButtons()
         }
     }
 
@@ -125,12 +133,30 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
                 self.cameraFraming.distance(at: requested.zoom)
             )
             self.view = requested
+            if let orientation = requested.orientation { self.interfaceOrientation = orientation }
             self.screenQuad = self.projectedScreenQuad(
                 rotation: requested.rotation,
                 zoom: requested.zoom
             )
             self.screenPieces = self.projectedScreenPieces()
+            self.screenButtons = self.projectedScreenButtons()
         }
+    }
+
+    @MainActor
+    private func projectedScreenButtons() -> [ScreenButtonMark]? {
+        guard let fold = plan.model.definition.scene.fold, !buttonAnchors.isEmpty else { return nil }
+        return FoldedScreenProjection.buttons(
+            buttonAnchors,
+            body: bodyExtents,
+            margin: max(bodyExtents.x, bodyExtents.y) * 0.06,
+            hingeDegrees: hingeDegrees,
+            fold: fold,
+            rotation: view.rotation,
+            distance: cameraFraming.distance(at: view.zoom),
+            fieldOfViewDegrees: cameraFraming.fieldOfViewDegrees,
+            aspect: Double(plan.outputSize.width) / Double(plan.outputSize.height)
+        )
     }
 
     /// A foldable's lit screen in the output image at the current hinge
@@ -146,7 +172,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             inner: screenLocalCorners,
             cover: coverLocalCorners,
             litPanel: lit,
-            orientation: lit == .secondary ? .landscapeLeft : .portrait,
+            orientation: interfaceOrientation ?? (lit == .secondary ? .landscapeLeft : .portrait),
             hingeDegrees: hingeDegrees,
             fold: fold,
             rotation: view.rotation,
@@ -303,6 +329,11 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         }
         screenLocalCorners = corners(self.screen)
         coverLocalCorners = coverScreen.map(corners)
+        bodyExtents = Vector3(x: Double(extents.x), y: Double(extents.y), z: Double(extents.z))
+        buttonAnchors = (definition.scene.buttons ?? []).compactMap { button in
+            Self.jointRestPosition(named: button.joint, of: self.screen.entity, relativeTo: wrapperEntity)
+                .map { ScreenButtonAnchor(id: button.id, at: $0) }
+        }
 
         // A book's leaf stands up toward the camera as it shuts, so a
         // foldable is framed as deep as a leaf is wide.
@@ -347,6 +378,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         view = Device3DCamera(rotation: plan.rotation, zoom: 1)
         screenQuad = projectedScreenQuad(rotation: plan.rotation, zoom: 1)
         screenPieces = projectedScreenPieces()
+        screenButtons = projectedScreenButtons()
 
         // The engine's MSAA covers lit geometry but skips the unlit
         // screen pass, so its content edge stair-steps on tilted poses.
@@ -548,6 +580,32 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     }
 
     // MARK: - entity helpers
+
+    /// A skeleton joint's rest position — the rest pose accumulated up
+    /// its parents — in `reference`'s frame; nil when no skeleton of the
+    /// entity's mesh has the joint.
+    @MainActor
+    private static func jointRestPosition(
+        named name: String, of entity: ModelEntity, relativeTo reference: Entity
+    ) -> Vector3? {
+        guard let model = entity.model else { return nil }
+        for skeleton in model.mesh.contents.skeletons {
+            let joints = skeleton.joints
+            guard let index = joints.firstIndex(where: { $0.name == name || $0.name.hasSuffix("/" + name) }) else {
+                continue
+            }
+            var matrix = matrix_identity_float4x4
+            var current: Int? = index
+            while let i = current {
+                matrix = joints[i].restPoseTransform.matrix * matrix
+                current = joints[i].parentIndex
+            }
+            let local = SIMD3<Float>(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z)
+            let world = entity.convert(position: local, to: reference)
+            return Vector3(x: Double(world.x), y: Double(world.y), z: Double(world.z))
+        }
+        return nil
+    }
 
     /// The bounds of the mesh parts on one material, in `reference`'s
     /// frame; nil when the entity has no such part.

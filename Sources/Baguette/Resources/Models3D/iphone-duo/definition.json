@@ -21,6 +21,12 @@
     "usesScreenOverlay": false,
     "textureRotation": 270,
     "restRotation": {"x": 90, "y": 0, "z": 0},
+    "buttons": [
+      {"id": "power", "joint": "oknVLIOxyFKJJzk"},
+      {"id": "action", "joint": "mblzAmIUcCyEAJi"},
+      {"id": "volume-up", "joint": "xsdEUgktlZKTjeM"},
+      {"id": "volume-down", "joint": "oRVcvMIHfnBuWqp"}
+    ],
     "fold": {
       "clip": "l_over_r",
       "shutTime": 5.0,

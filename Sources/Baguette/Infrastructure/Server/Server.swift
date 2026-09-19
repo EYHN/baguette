@@ -1944,9 +1944,12 @@ struct Server: Sendable {
     /// at the hinge — each with its corners in the framebuffer's order
     /// and the part of the buffer it shows. Sent in `screen_quad`'s
     /// place whenever the pose or the camera changes.
-    static func screenPiecesJSON(_ pieces: [ScreenPiece]) -> String? {
+    static func screenPiecesJSON(_ pieces: [ScreenPiece], buttons: [ScreenButtonMark] = []) -> String? {
         let object: [String: Any] = [
             "type": "screen_quad",
+            "buttons": buttons.map {
+                ["id": $0.id, "at": [$0.at.u, $0.at.v], "control": [$0.control.u, $0.control.v]]
+            },
             "pieces": pieces.map { piece -> [String: Any] in
                 let q = piece.quad
                 return [
@@ -1970,7 +1973,9 @@ struct Server: Sendable {
     /// `screen_quad` for whatever the scene projects: a foldable's pieces
     /// when it has them, else the one quad.
     static func screenPlacementJSON(_ scene: any DeviceScene) -> String? {
-        if let pieces = scene.screenPieces { return screenPiecesJSON(pieces) }
+        if let pieces = scene.screenPieces {
+            return screenPiecesJSON(pieces, buttons: scene.screenButtons ?? [])
+        }
         if let quad = scene.screenQuad { return screenQuadJSON(quad) }
         return nil
     }

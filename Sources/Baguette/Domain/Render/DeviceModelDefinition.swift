@@ -106,6 +106,14 @@ struct DeviceModelFold: Equatable, Sendable, Codable {
     }
 }
 
+/// A hardware button the model carries: the wire name the page presses
+/// (`DeviceButton`) and the skeleton joint that sits on it, whose rest
+/// position is where the page draws the control.
+struct DeviceModelButton: Equatable, Sendable, Codable {
+    let id: String
+    let joint: String
+}
+
 struct DeviceModelScene: Equatable, Sendable, Codable {
     let rootNode: String
     let screenNode: String?
@@ -122,6 +130,7 @@ struct DeviceModelScene: Equatable, Sendable, Codable {
     /// standing up.
     let restRotation: DeviceRotation?
     let fold: DeviceModelFold?
+    let buttons: [DeviceModelButton]?
 
     init(
         rootNode: String,
@@ -132,7 +141,8 @@ struct DeviceModelScene: Equatable, Sendable, Codable {
         usesScreenOverlay: Bool,
         textureRotation: Int? = nil,
         restRotation: DeviceRotation? = nil,
-        fold: DeviceModelFold? = nil
+        fold: DeviceModelFold? = nil,
+        buttons: [DeviceModelButton]? = nil
     ) {
         self.rootNode = rootNode
         self.screenNode = screenNode
@@ -143,6 +153,7 @@ struct DeviceModelScene: Equatable, Sendable, Codable {
         self.textureRotation = textureRotation
         self.restRotation = restRotation
         self.fold = fold
+        self.buttons = buttons
     }
 }
 
@@ -302,6 +313,11 @@ struct DeviceModelDefinition: Equatable, Sendable, Codable {
         }
         for turn in [scene.textureRotation, scene.fold?.coverTextureRotation].compactMap({ $0 }) {
             guard turn % 90 == 0 else { throw DeviceModelError.invalidTextureRotation(turn) }
+        }
+        for button in scene.buttons ?? [] {
+            guard !button.id.isEmpty, !button.joint.isEmpty else {
+                throw DeviceModelError.emptyField("scene.buttons")
+            }
         }
         if let fold = scene.fold {
             guard !fold.clip.isEmpty else { throw DeviceModelError.emptyField("scene.fold.clip") }

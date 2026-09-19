@@ -73,9 +73,11 @@ struct FoldedScreenProjectionTests {
     }
 
     @Test func `a button on the right half stays put as the book bends; one on the left half turns with it`() throws {
+        let body = Vector3(x: 4, y: 2, z: 0.1)
         let marks = FoldedScreenProjection.buttons(
             [ScreenButtonAnchor(id: "power", at: Vector3(x: 2, y: 0.5, z: 0)),
              ScreenButtonAnchor(id: "camera", at: Vector3(x: -2, y: 0.5, z: 0))],
+            body: body, margin: 0.5,
             hingeDegrees: 180, fold: fold, rotation: .zero,
             distance: camera.distance, fieldOfViewDegrees: camera.fov, aspect: camera.aspect
         )
@@ -85,11 +87,28 @@ struct FoldedScreenProjectionTests {
 
         let shut = FoldedScreenProjection.buttons(
             [ScreenButtonAnchor(id: "camera", at: Vector3(x: -2, y: 0.5, z: 0))],
+            body: body, margin: 0.5,
             hingeDegrees: 0, fold: fold, rotation: .zero,
             distance: camera.distance, fieldOfViewDegrees: camera.fov, aspect: camera.aspect
         )
         // Turned 180° about the hinge: x → −x.
         #expect(near(shut[0].at, u: 0.6, v: 0.475))
+    }
+
+    @Test func `a button's control sits outside the body, off the edge the button is on`() throws {
+        // Device Hub draws the controls beside the device, not on it:
+        // a side button's control is out past that side, a top
+        // button's above the top.
+        let body = Vector3(x: 4, y: 2, z: 0.1)
+        let marks = FoldedScreenProjection.buttons(
+            [ScreenButtonAnchor(id: "power", at: Vector3(x: 2, y: 0.5, z: 0)),
+             ScreenButtonAnchor(id: "volume-up", at: Vector3(x: 1, y: 1, z: 0))],
+            body: body, margin: 0.5,
+            hingeDegrees: 180, fold: fold, rotation: .zero,
+            distance: camera.distance, fieldOfViewDegrees: camera.fov, aspect: camera.aspect
+        )
+        #expect(near(marks[0].control, u: 0.625, v: 0.475))   // x 2 → 2.5
+        #expect(near(marks[1].control, u: 0.55, v: 0.425))    // y 1 → 1.5
     }
 
     func near(_ p: NormalizedPoint, u: Double, v: Double, tolerance: Double = 1e-6) -> Bool {

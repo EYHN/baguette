@@ -37,4 +37,8 @@ protocol DeviceScene: AnyObject, Sendable {
     /// (`FoldedScreenProjection`), replacing `screenQuad`; nil on a
     /// phone.
     var screenPieces: [ScreenPiece]? { get }
+
+    /// Where the model's hardware buttons land in the rendered image,
+    /// for a model whose definition names them; nil otherwise.
+    var screenButtons: [ScreenButtonMark]? { get }
 }

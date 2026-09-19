@@ -197,6 +197,61 @@
     this.setMode(this.mode);
   };
 
+  /**
+   * The model's hardware buttons, where the server says they land in
+   * the frame: a control per button, pressed like the flat chrome's.
+   * Shown while the pointer is over the stage, as Device Hub shows
+   * them; the server moves them as the book turns.
+   */
+  Sim3DPanel.prototype.placeButtons = function (buttons) {
+    if (!this.stage || !this.canvas) return;
+    let host = this.stage.querySelector('[data-role="hw-buttons"]');
+    if (!buttons.length) { if (host) host.remove(); return; }
+    if (!host) {
+      host = document.createElement('div');
+      host.dataset.role = 'hw-buttons';
+      host.className = 'r3d-hw-buttons';
+      this.stage.appendChild(host);
+    }
+    const GLYPH = {
+      'power': '\u23FB', 'action': '\u25CE',
+      'volume-up': '\uD83D\uDD0A+', 'volume-down': '\uD83D\uDD09\u2212',
+    };
+    const LABEL = {
+      'power': 'Sleep/Wake', 'action': 'Camera Control',
+      'volume-up': 'Volume Up', 'volume-down': 'Volume Down',
+    };
+    const rect = window.Baguette._ScreenQuad.contentRect(this.canvas);
+    const stageRect = this.stage.getBoundingClientRect();
+    const seen = new Set();
+    buttons.forEach((b) => {
+      if (!b || !b.id || !Array.isArray(b.at)) return;
+      seen.add(b.id);
+      let el = host.querySelector('[data-hw="' + b.id + '"]');
+      if (!el) {
+        el = document.createElement('button');
+        el.type = 'button';
+        el.dataset.hw = b.id;
+        el.className = 'r3d-hw-button';
+        el.title = LABEL[b.id] || b.id;
+        el.setAttribute('aria-label', el.title);
+        el.textContent = GLYPH[b.id] || b.id;
+        el.addEventListener('click', (event) => {
+          event.stopPropagation();
+          this.send({ type: 'button', button: b.id });
+        });
+        host.appendChild(el);
+      }
+      // The control sits beside the device, off the button's edge.
+      const spot = Array.isArray(b.control) ? b.control : b.at;
+      el.style.left = (rect.left - stageRect.left + spot[0] * rect.width) + 'px';
+      el.style.top = (rect.top - stageRect.top + spot[1] * rect.height) + 'px';
+    });
+    host.querySelectorAll('[data-hw]').forEach((el) => {
+      if (!seen.has(el.dataset.hw)) el.remove();
+    });
+  };
+
   Sim3DPanel.prototype.start = function () {
     this.stop();
     if (!this.canvas || !this.model) return;
@@ -242,6 +297,7 @@
           // One quad for a phone; a foldable's lit screen in pieces.
           const pieces = window.Baguette._ScreenPieces.fromMessage(envelope);
           this.screenQuad = pieces.length ? pieces : null;
+          this.placeButtons(Array.isArray(envelope.buttons) ? envelope.buttons : []);
           return true;
         }
         if (envelope && envelope.type === 'gyro') {

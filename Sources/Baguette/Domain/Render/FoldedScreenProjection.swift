@@ -9,6 +9,20 @@ struct ScreenPiece: Equatable, Sendable {
     let v: ClosedRange<Double>
 }
 
+/// A hardware button's place on the model, in the rest frame.
+struct ScreenButtonAnchor: Equatable, Sendable {
+    let id: String
+    let at: Vector3
+}
+
+/// Where a hardware button lands in the rendered image, and where its
+/// control goes: beside the device, off the edge the button is on.
+struct ScreenButtonMark: Equatable, Sendable {
+    let id: String
+    let at: NormalizedPoint
+    let control: NormalizedPoint
+}
+
 /// Where a foldable's lit screen lands in the rendered image, for the
 /// pose `FoldPose` gives a hinge angle.
 ///
@@ -80,6 +94,45 @@ enum FoldedScreenProjection {
                 ScreenPiece(quad: right.projected(project).inBufferOrder(orientation),
                             u: rightRange.u, v: rightRange.v),
             ]
+        }
+    }
+
+    /// Where the model's buttons land: those on the left half (x < 0)
+    /// turn with it as the book shuts, the rest only with the whole.
+    /// `body` is the flat device's extents in the rest frame; a
+    /// button's control is pushed `margin` out past whichever edge —
+    /// side or top/bottom — the button sits on, as Device Hub draws
+    /// them beside the device.
+    static func buttons(
+        _ anchors: [ScreenButtonAnchor],
+        body: Vector3,
+        margin: Double,
+        hingeDegrees: Double,
+        fold: DeviceModelFold,
+        rotation: DeviceRotation,
+        distance: Double,
+        fieldOfViewDegrees: Double,
+        aspect: Double
+    ) -> [ScreenButtonMark] {
+        let pose = FoldPose.at(degrees: hingeDegrees, fold: fold)
+        let raise = 180 - max(0, min(180, hingeDegrees))
+        let project = { (anchor: Vector3, point: Vector3) -> NormalizedPoint in
+            var p = point
+            if anchor.x < 0 { p = ScreenQuadProjection.rotateY(p, degrees: raise) }
+            p = ScreenQuadProjection.rotateY(p, degrees: pose.yawDegrees)
+            return ScreenQuadProjection.projectRotated(
+                ScreenQuadProjection.rotate(p, by: rotation),
+                distance: distance, fieldOfViewDegrees: fieldOfViewDegrees, aspect: aspect
+            )
+        }
+        return anchors.map { anchor in
+            let p = anchor.at
+            let onSide = abs(p.x) / max(body.x / 2, 1e-9) >= abs(p.y) / max(body.y / 2, 1e-9)
+            let outward = onSide
+                ? Vector3(x: p.x < 0 ? -margin : margin, y: 0, z: 0)
+                : Vector3(x: 0, y: p.y < 0 ? -margin : margin, z: 0)
+            let control = Vector3(x: p.x + outward.x, y: p.y + outward.y, z: p.z)
+            return ScreenButtonMark(id: anchor.id, at: project(p, p), control: project(p, control))
         }
     }
 
