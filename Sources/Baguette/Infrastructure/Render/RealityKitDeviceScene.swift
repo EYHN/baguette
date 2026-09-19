@@ -124,6 +124,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
                 angle: Self.radians(pose.yawDegrees), axis: [0, 1, 0]
             ) * self.restOrientation
             self.hingeDegrees = hingeDegrees
+            self.wrapper.orientation = Self.orientation(self.effectiveRotation)
             self.screenPieces = self.projectedScreenPieces()
             self.screenButtons = self.projectedScreenButtons()
         }
@@ -131,19 +132,38 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
 
     func update(camera requested: Device3DCamera) {
         Self.onMain {
-            self.wrapper.orientation = Self.orientation(requested.rotation)
+            self.view = requested
+            if let orientation = requested.orientation { self.interfaceOrientation = orientation }
+            self.wrapper.orientation = Self.orientation(self.effectiveRotation)
             self.cameraEntity.position.z = Float(
                 self.cameraFraming.distance(at: requested.zoom)
             )
-            self.view = requested
-            if let orientation = requested.orientation { self.interfaceOrientation = orientation }
             self.screenQuad = self.projectedScreenQuad(
-                rotation: requested.rotation,
+                rotation: self.effectiveRotation,
                 zoom: requested.zoom
             )
             self.screenPieces = self.projectedScreenPieces()
             self.screenButtons = self.projectedScreenButtons()
         }
+    }
+
+    func update(interfaceOrientation: DeviceOrientation) {
+        Self.onMain {
+            self.interfaceOrientation = interfaceOrientation
+            self.wrapper.orientation = Self.orientation(self.effectiveRotation)
+            self.screenPieces = self.projectedScreenPieces()
+            self.screenButtons = self.projectedScreenButtons()
+        }
+    }
+
+    /// The requested rotation with a foldable's interface roll on top:
+    /// the book stands the way the guest is held (`InterfaceRoll`).
+    @MainActor
+    private var effectiveRotation: DeviceRotation {
+        guard plan.model.definition.scene.fold != nil, let lit = litPanel else { return view.rotation }
+        let orientation = interfaceOrientation ?? (lit == .secondary ? .landscapeLeft : .portrait)
+        let roll = InterfaceRoll.degrees(orientation, litPanel: lit)
+        return DeviceRotation(x: view.rotation.x, y: view.rotation.y, z: view.rotation.z + roll)
     }
 
     @MainActor
@@ -155,7 +175,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             margin: max(bodyExtents.x, bodyExtents.y) * 0.06,
             hingeDegrees: hingeDegrees,
             fold: fold,
-            rotation: view.rotation,
+            rotation: effectiveRotation,
             distance: cameraFraming.distance(at: view.zoom),
             fieldOfViewDegrees: cameraFraming.fieldOfViewDegrees,
             aspect: Double(plan.outputSize.width) / Double(plan.outputSize.height)
@@ -178,7 +198,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             orientation: interfaceOrientation ?? (lit == .secondary ? .landscapeLeft : .portrait),
             hingeDegrees: hingeDegrees,
             fold: fold,
-            rotation: view.rotation,
+            rotation: effectiveRotation,
             distance: cameraFraming.distance(at: view.zoom),
             fieldOfViewDegrees: cameraFraming.fieldOfViewDegrees,
             aspect: Double(plan.outputSize.width) / Double(plan.outputSize.height)
@@ -379,7 +399,8 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         )
 
         view = Device3DCamera(rotation: plan.rotation, zoom: 1)
-        screenQuad = projectedScreenQuad(rotation: plan.rotation, zoom: 1)
+        wrapperEntity.orientation = Self.orientation(effectiveRotation)
+        screenQuad = projectedScreenQuad(rotation: effectiveRotation, zoom: 1)
         screenPieces = projectedScreenPieces()
         screenButtons = projectedScreenButtons()
 

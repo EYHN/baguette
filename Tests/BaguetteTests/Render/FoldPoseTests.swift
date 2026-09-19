@@ -44,3 +44,26 @@ struct FoldPoseTests {
         #expect(FoldPose.at(degrees: -5, fold: fold).clipTime == 5.0)
     }
 }
+
+// The book stands the way the guest is held. The lit panel has an
+// orientation of its own — the unfolded panel is landscape-left lying
+// flat in the model, the cover portrait — and each step of the
+// interface cycle turns the device another quarter turn.
+@Suite("InterfaceRoll")
+struct InterfaceRollTests {
+    @Test func `the lit panel's own orientation is the model as it stands`() {
+        #expect(InterfaceRoll.degrees(.landscapeLeft, litPanel: .secondary) == 0)
+        #expect(InterfaceRoll.degrees(.portrait, litPanel: .primary) == 0)
+    }
+
+    @Test func `a portrait interface on the unfolded panel stands the book up`() {
+        #expect(InterfaceRoll.degrees(.portrait, litPanel: .secondary) == -90)
+        #expect(InterfaceRoll.degrees(.portraitUpsideDown, litPanel: .secondary) == 90)
+        #expect(InterfaceRoll.degrees(.landscapeRight, litPanel: .secondary) == 180)
+    }
+
+    @Test func `the shut cover turns the same way`() {
+        #expect(InterfaceRoll.degrees(.landscapeLeft, litPanel: .primary) == 90)
+        #expect(InterfaceRoll.degrees(.landscapeRight, litPanel: .primary) == -90)
+    }
+}

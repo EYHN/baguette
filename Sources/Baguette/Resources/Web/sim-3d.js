@@ -23,8 +23,6 @@
     // default, since its book is drawn from the same model the free
     // 3D view orbits.
     this.fixed = false;
-    this.fixedRoll = 0;
-    this.interfaceOrientation = null;
     this.litPanel = null;
     this.variants = {};
     this.screenGlass = false;
@@ -138,7 +136,7 @@
     this.fixed = !!fixed;
     if (this.stage) this.stage.dataset.fixed = this.fixed ? 'true' : 'false';
     if (this.fixed) {
-      this.rotation = { x: 0, y: 0, z: this.fixedRoll || 0 };
+      this.rotation = { x: 0, y: 0, z: 0 };
       this.zoom = 1;
       this.mode = 'interact';
     } else {
@@ -790,30 +788,8 @@
         rotation: this.rotation,
         zoom: this.zoom,
       };
-      if (this.interfaceOrientation) envelope.orientation = this.interfaceOrientation;
       this.send(envelope);
     });
-  };
-
-  /**
-   * A foldable held the way the guest is: the book stands turned by
-   * the interface orientation — its unfolded panel is landscape-left
-   * lying flat — and the server orders the lit screen's pieces as that
-   * framebuffer is drawn. The roll is the fixed view's; a free view
-   * keeps orbiting from wherever it is.
-   */
-  Sim3DPanel.prototype.setInterfaceOrientation = function (value) {
-    // Each step of the cycle is the device turned another 90°; the lit
-    // panel's own orientation — the cover's portrait, the unfolded
-    // panel's landscape-left — is the book as the model stands.
-    const CYCLE = ['portrait', 'landscape-left', 'portrait-upside-down', 'landscape-right'];
-    const natural = this.litPanel === 'primary' ? 'portrait' : 'landscape-left';
-    const steps = ((CYCLE.indexOf(value) - CYCLE.indexOf(natural)) % 4 + 4) % 4;
-    this.interfaceOrientation = value;
-    this.fixedRoll = steps === 0 ? 0 : steps === 1 ? 90 : steps === 2 ? 180 : -90;
-    if (this.fixed) this.rotation = { x: 0, y: 0, z: this.fixedRoll };
-    this.syncCameraControls();
-    this.sendCamera();
   };
 
   Sim3DPanel.prototype.syncCameraControls = function () {

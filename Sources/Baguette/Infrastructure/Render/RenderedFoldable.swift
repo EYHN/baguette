@@ -30,17 +30,41 @@ final class RenderedFoldable: Screen, @unchecked Sendable {
     private var isPosed = false
 
     private let onPose: @Sendable () -> Void
+    private let orientation: @Sendable () -> DeviceOrientation?
+    private var orientationTimer: DispatchSourceTimer?
+    private var lastOrientation: DeviceOrientation?
+    /// How often the lit panel is asked which way the guest holds it.
+    static let orientationPollInterval: TimeInterval = 2
 
-    /// `onPose` runs after each hinge sample has posed the scene.
+    /// `onPose` runs after each hinge sample has posed the scene;
+    /// `orientation` reads the lit panel's interface orientation, polled
+    /// while the stream runs (the host is never told of a change).
     init(
         unfolded: any Screen, cover: any Screen, hinge: any Hinge, scene: any DeviceScene,
-        onPose: @escaping @Sendable () -> Void = {}
+        onPose: @escaping @Sendable () -> Void = {},
+        orientation: @escaping @Sendable () -> DeviceOrientation? = { nil }
     ) {
         self.unfolded = unfolded
         self.cover = cover
         self.hinge = hinge
         self.scene = scene
         self.onPose = onPose
+        self.orientation = orientation
+    }
+
+    /// Ask the lit panel which way the guest holds it; a new answer
+    /// stands the book that way and recomposes.
+    func pollOrientation() {
+        guard let current = orientation() else { return }
+        let changed = lock.withLock { () -> Bool in
+            guard !isStopped, current != lastOrientation else { return false }
+            lastOrientation = current
+            return true
+        }
+        guard changed else { return }
+        scene.update(interfaceOrientation: current)
+        onPose()
+        refresh()
     }
 
     func start(onFrame: @escaping @Sendable (IOSurface) -> Void) throws {
@@ -71,18 +95,30 @@ final class RenderedFoldable: Screen, @unchecked Sendable {
             self.onPose()
             self.refresh()
         }
-        lock.withLock { self.watch = watch }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + Self.orientationPollInterval,
+            repeating: Self.orientationPollInterval
+        )
+        timer.setEventHandler { [weak self] in self?.pollOrientation() }
+        timer.resume()
+        lock.withLock {
+            self.watch = watch
+            self.orientationTimer = timer
+        }
     }
 
     func stop() {
-        let watch = lock.withLock {
+        let (watch, timer) = lock.withLock {
             isStopped = true
             pending = false
             latest = FoldableScreens(unfolded: nil, cover: nil)
             delivery = nil
-            defer { self.watch = nil }
-            return self.watch
+            lastOrientation = nil
+            defer { self.watch = nil; self.orientationTimer = nil }
+            return (self.watch, self.orientationTimer)
         }
+        timer?.cancel()
         watch?.cancel()
         unfolded.stop()
         cover.stop()

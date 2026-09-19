@@ -23,3 +23,26 @@ struct FoldPose: Equatable, Sendable {
         )
     }
 }
+
+/// How far a foldable's model turns about the camera axis so that it
+/// stands the way the guest is held. The lit panel has an orientation
+/// of its own — the unfolded panel is landscape-left lying flat in the
+/// model, the cover portrait — and each step of the interface cycle
+/// (portrait → landscape-left → upside-down → landscape-right) is the
+/// device turned another quarter turn.
+enum InterfaceRoll {
+    private static let cycle: [DeviceOrientation] = [
+        .portrait, .landscapeLeft, .portraitUpsideDown, .landscapeRight,
+    ]
+
+    static func degrees(_ orientation: DeviceOrientation, litPanel: IntegratedPanel) -> Double {
+        let natural: DeviceOrientation = litPanel == .primary ? .portrait : .landscapeLeft
+        let steps = ((cycle.firstIndex(of: orientation)! - cycle.firstIndex(of: natural)!) % 4 + 4) % 4
+        switch steps {
+        case 1: return 90
+        case 2: return 180
+        case 3: return -90
+        default: return 0
+        }
+    }
+}
