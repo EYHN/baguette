@@ -133,18 +133,45 @@ space. `baguette chrome layout --udid <UDID>` reports the cover's
 
 ## What the beta cannot do yet
 
-- **No fold / unfold.** Nothing on the host drives the hinge: `simctl io
-  screenConfig` only has `power` and `geometry`, `devicectl device
-  motion` can *monitor* a hinge angle on real hardware and `simulate`
-  offers biometrics / location / statusBar only, and Device Hub's UI has
-  no posture control. In the guest the angle arrives as an IOHID event
-  (`kIOHIDEventTypeHingeAngle`) and SpringBoard has an
-  `SBSDisplayToolService` with "swap display" / "setPrimary" / "hinge
-  replay" requests, all gated on an entitlement. So the Duo is a
-  466 × 678 phone with a dark second panel until Apple wires a control
-  up. When it does, "lit" will need a host-side signal — `primary`
-  will presumably stop being the answer once the cover turns off — and
-  that is the first thing to re-measure.
+- **No fold / unfold.** Apple's Duo guidance describes six poses
+  (closed, tent, open landscape, book, open portrait, laptop), but
+  nothing shipped drives them. Host side: `simctl io screenConfig` has
+  only `power` and `geometry` (powering `primary-1` on lights nothing —
+  the guest's pose, not the panel's power, decides what is drawn);
+  `devicectl device motion` can *monitor* a hinge angle on real
+  hardware and `simulate` offers biometrics / location / statusBar;
+  neither Xcode 27.0's nor 27.1 beta's Device Hub has a pose control —
+  DeviceKit ships exactly one Duo asset, `v68_Closed`; UniversalHID /
+  `dtuhidd` carry no hinge event type. So the Duo is a 466 × 678 phone
+  with a dark second panel until Apple wires a control up.
+
+  Where the pose actually lives, for whoever picks this up:
+  - `SBFDevicePoseProvider` (SpringBoardFoundation) owns the pose.
+    Its angle comes from a CoreMotion hinge manager
+    (`_cmAngleManager`; CoreMotion is the guest's consumer of
+    `kIOHIDEventTypeHingeAngle`), and CoreMotion is gated off on the
+    simulator platform — the same hardware-capability bit that makes
+    `motion.md` inject `VirtualMotion.dylib`. The hinge therefore
+    reports `isAvailable = NO` and the pose never leaves *closed*.
+  - It persists `SBFDevicePoseLastKnownCMAngle` in `com.apple.springboard`
+    as `{isAvailable, minAngleDegrees, maxAngleDegrees, angleDegrees,
+    velocityDegreesPerSeconds}` and `SBFDisplayContentModeResolver`
+    reads it at init. Writing `angleDegrees = 180, isAvailable = 1`
+    and restarting SpringBoard was tried: read back fine, no effect —
+    the live manager's unavailability wins.
+  - Two override entry points exist, both inside the guest:
+    `systemServiceServer:client:setDevicePoseOverride:` (a SpringBoard
+    system service) and `setDisplayToolProfileOverride:` behind
+    `SBSDisplayToolService` ("swap display" / "setPrimary" / "hinge
+    replay"), which logs *Insufficient authorization* for unentitled
+    clients. A spike would be: inject into a guest process that holds
+    the entitlement, or inject a CM hinge shim into SpringBoard the way
+    `VirtualMotion` shims apps — `launchctl setenv` in the guest launchd
+    plus a SpringBoard kickstart. Neither is done.
+
+  When a control does land, "lit" will need a host-side signal —
+  `primary` will presumably stop being the answer once the cover turns
+  off — and that is the first thing to re-measure.
 - **The unfolded panel is not a plane of its own.** `--display` still
   accepts `phone | carplay`. Exposing `primary-1` would today stream a
   black surface and drive a digitizer for a panel the guest has turned
