@@ -46,9 +46,10 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private var coverLocalCorners: ScreenLocalCorners?
     private var hingeDegrees: Double = 180
     private var view = Device3DCamera(rotation: .zero, zoom: 1)
-    /// The guest's interface orientation as the page last named it; nil
+    /// The interface orientation the page last asked the guest for; nil
     /// means the usual: the unfolded panel landscape-left, the cover
-    /// portrait.
+    /// portrait. Not read back from the guest — the page's rotate
+    /// button turns the book, as it turns a phone's chrome.
     private var interfaceOrientation: DeviceOrientation?
     private(set) var screenQuad: ScreenQuad?
     private(set) var screenPieces: [ScreenPiece]?
@@ -147,15 +148,6 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         }
     }
 
-    func update(interfaceOrientation: DeviceOrientation) {
-        Self.onMain {
-            self.interfaceOrientation = interfaceOrientation
-            self.wrapper.orientation = Self.orientation(self.effectiveRotation)
-            self.screenPieces = self.projectedScreenPieces()
-            self.screenButtons = self.projectedScreenButtons()
-        }
-    }
-
     /// The requested rotation with a foldable's interface roll on top:
     /// the book stands the way the guest is held (`InterfaceRoll`).
     @MainActor
@@ -183,9 +175,8 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     }
 
     /// A foldable's lit screen in the output image at the current hinge
-    /// angle and camera. The unfolded panel is landscape-left by the
-    /// guest's choice and the cover portrait, as `Simulator.litPanel`
-    /// and the page assume.
+    /// angle and camera. The unfolded panel's buffer lies landscape-left
+    /// on its mesh and the cover's portrait.
     @MainActor
     private func projectedScreenPieces() -> [ScreenPiece]? {
         guard let fold = plan.model.definition.scene.fold,
@@ -195,7 +186,10 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             inner: screenLocalCorners,
             cover: coverLocalCorners,
             litPanel: lit,
-            orientation: interfaceOrientation ?? (lit == .secondary ? .landscapeLeft : .portrait),
+            // How the panel's buffer lies on the mesh — fixed by the
+            // hardware, not by what the guest draws: touches land in
+            // buffer space whatever the interface orientation.
+            orientation: lit == .secondary ? .landscapeLeft : .portrait,
             hingeDegrees: hingeDegrees,
             fold: fold,
             rotation: effectiveRotation,

@@ -2735,12 +2735,6 @@ struct Server: Sendable {
                     if let json = screenPlacementJSON(scene) {
                         Task { try? await outbound.write(.text(json)) }
                     }
-                },
-                orientation: {
-                    // Which way the guest holds the lit panel, as its
-                    // Connected Screen reports it; nil while ambiguous.
-                    guard let lit = scene.litPanel else { return nil }
-                    return (try? sim.displays().panel(lit).resolve())?.orientation
                 }
             )
             screen = book

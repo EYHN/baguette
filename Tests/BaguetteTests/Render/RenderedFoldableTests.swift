@@ -75,45 +75,6 @@ struct RenderedFoldableTests {
         verify(scene).update(hingeDegrees: .value(120)).called(1)
     }
 
-    @Test func `the lit panel's interface orientation is polled and the book stands that way`() throws {
-        // Device Hub turns the guest; the host can only read what the
-        // lit panel reports. Each poll that finds a definite orientation
-        // hands it to the scene and recomposes.
-        let unfolded = MockScreen(), cover = MockScreen()
-        let hinge = MockHinge(), watch = MockHingeWatch()
-        let scene = MockDeviceScene()
-        let inner = try #require(RenderedScreenTests.surface(width: 2, height: 2))
-        let rendered = try #require(RenderedScreenTests.surface(width: 4, height: 3))
-        var innerDelivery: (@Sendable (IOSurface) -> Void)?
-        given(unfolded).start(onFrame: .any).willProduce { innerDelivery = $0 }
-        given(cover).start(onFrame: .any).willReturn()
-        given(hinge).angle().willReturn(HingeAngle(degrees: 130))
-        given(hinge).watch(onAngle: .any).willReturn(watch)
-        given(scene).update(hingeDegrees: .any).willReturn()
-        given(scene).update(interfaceOrientation: .any).willReturn()
-        let renders = LockedCount()
-        given(scene).render(screens: .any).willProduce { _ in renders.increment(); return rendered }
-        let reported = LockedOrientation()
-        let screen = RenderedFoldable(
-            unfolded: unfolded, cover: cover, hinge: hinge, scene: scene,
-            orientation: { reported.value }
-        )
-        try screen.start { _ in }
-        innerDelivery?(inner)
-        #expect(RenderedScreenTests.waitUntil { renders.value == 1 })
-
-        reported.value = .portrait
-        screen.pollOrientation()
-        #expect(RenderedScreenTests.waitUntil { renders.value == 2 })
-        verify(scene).update(interfaceOrientation: .value(.portrait)).called(1)
-
-        // The same answer again is not news.
-        screen.pollOrientation()
-        Thread.sleep(forTimeInterval: 0.03)
-        #expect(renders.value == 2)
-        verify(scene).update(interfaceOrientation: .any).called(1)
-    }
-
     @Test func `the book is posed at the standing angle before any frame is composed`() throws {
         // A scene starts flat; a frame composed before the hinge has
         // spoken would show the book open when it is shut.
@@ -166,15 +127,6 @@ private final class LockedScreens: @unchecked Sendable {
     private var storage: [FoldableScreens] = []
     var value: [FoldableScreens] { lock.withLock { storage } }
     func append(_ screens: FoldableScreens) { lock.withLock { storage.append(screens) } }
-}
-
-private final class LockedOrientation: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: DeviceOrientation?
-    var value: DeviceOrientation? {
-        get { lock.withLock { storage } }
-        set { lock.withLock { storage = newValue } }
-    }
 }
 
 private final class LockedLog: @unchecked Sendable {

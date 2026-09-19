@@ -1946,10 +1946,10 @@
       const cycle = orientationCycle();
       orientationIndex = (orientationIndex + 1) % cycle.length;
       const value = cycle[orientationIndex];
-      // A foldable's book stands the way the guest is held: the 3D
-      // scene reads that from the lit panel, so only the guest is told.
+      // A foldable's book turns in 3D, as the flat chrome would.
       if (foldable) {
         currentOrientation = value;
+        if (render3DPanel) render3DPanel.setInterfaceOrientation(value);
         const url = '/simulators/' + encodeURIComponent(udid)
             + '/orientation?value=' + encodeURIComponent(value);
         fetch(url, { method: 'POST' }).catch(() => { /* best-effort */ });

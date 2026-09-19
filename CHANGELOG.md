@@ -17,8 +17,8 @@ For releases prior to this changelog, see the
   plug-in — the model Device Hub draws) on the RealityKit pipeline,
   straight on, with both panels on the book's screens and the hinge
   posing it live. Clicks map through the lit screen's pieces, the
-  model's buttons are controls beside the device, and the rotate
-  button turns the book and the guest together. Model definitions
+  model's buttons are controls beside the device, and the book stands
+  the way the guest is held. Model definitions
   gain `asset.xcodeResource`, `scene.restRotation`,
   `scene.textureRotation`, `scene.fold` and `scene.buttons`; the 3D
   socket's `screen_quad` gains `pieces`, `buttons` and `litPanel`, and

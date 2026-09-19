@@ -57,13 +57,16 @@ struct InterfaceRollTests {
     }
 
     @Test func `a portrait interface on the unfolded panel stands the book up`() {
-        #expect(InterfaceRoll.degrees(.portrait, litPanel: .secondary) == -90)
-        #expect(InterfaceRoll.degrees(.portraitUpsideDown, litPanel: .secondary) == 90)
+        // Measured against Device Hub: the guest reporting "Portrait
+        // Upside Down" on the unfolded panel stands the book with its
+        // left half up, i.e. a quarter turn the other way round.
+        #expect(InterfaceRoll.degrees(.portrait, litPanel: .secondary) == 90)
+        #expect(InterfaceRoll.degrees(.portraitUpsideDown, litPanel: .secondary) == -90)
         #expect(InterfaceRoll.degrees(.landscapeRight, litPanel: .secondary) == 180)
     }
 
     @Test func `the shut cover turns the same way`() {
-        #expect(InterfaceRoll.degrees(.landscapeLeft, litPanel: .primary) == 90)
-        #expect(InterfaceRoll.degrees(.landscapeRight, litPanel: .primary) == -90)
+        #expect(InterfaceRoll.degrees(.landscapeLeft, litPanel: .primary) == -90)
+        #expect(InterfaceRoll.degrees(.landscapeRight, litPanel: .primary) == 90)
     }
 }

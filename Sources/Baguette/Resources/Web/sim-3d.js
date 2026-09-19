@@ -24,6 +24,7 @@
     // 3D view orbits.
     this.fixed = false;
     this.litPanel = null;
+    this.interfaceOrientation = null;
     this.variants = {};
     this.screenGlass = false;
     // The size/fit/background the user picked in the toolbar, shared with
@@ -788,8 +789,20 @@
         rotation: this.rotation,
         zoom: this.zoom,
       };
+      if (this.interfaceOrientation) envelope.orientation = this.interfaceOrientation;
       this.send(envelope);
     });
+  };
+
+  /**
+   * A foldable turned by the page's rotate button, as a phone's chrome
+   * turns: the server rolls the book to stand the way the guest is
+   * about to be held (`InterfaceRoll`), and the page tells the guest.
+   * Nothing is read back — a rotation made in Device Hub is its own.
+   */
+  Sim3DPanel.prototype.setInterfaceOrientation = function (value) {
+    this.interfaceOrientation = value;
+    this.sendCamera();
   };
 
   Sim3DPanel.prototype.syncCameraControls = function () {

@@ -19,11 +19,6 @@ protocol DeviceScene: AnyObject, Sendable {
     /// A foldable: pose the book at this hinge angle (`FoldPose`).
     func update(hingeDegrees: Double)
 
-    /// A foldable: stand the book the way the guest is held
-    /// (`InterfaceRoll`) and order the lit screen's pieces as that
-    /// framebuffer is drawn.
-    func update(interfaceOrientation: DeviceOrientation)
-
     /// Mutate camera state without reloading the model or reconnecting.
     func update(camera: Device3DCamera)
 

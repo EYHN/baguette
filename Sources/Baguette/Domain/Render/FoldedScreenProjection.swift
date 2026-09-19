@@ -33,10 +33,12 @@ struct ScreenButtonMark: Equatable, Sendable {
 /// applies to everything, and the requested rotation after that, before
 /// the same perspective `ScreenQuadProjection` uses.
 ///
-/// The unfolded screen bends at the hinge, so it is two pieces. The
-/// guest draws it landscape into a portrait buffer, so each piece's
-/// corners are named in the buffer's order and it carries the buffer
-/// range it shows; the browser maps a click straight to buffer space.
+/// The unfolded screen bends at the hinge, so it is two pieces. Its
+/// buffer lies landscape-left on the mesh — a portrait buffer whose
+/// rows run along the long axis, whatever the guest draws into it —
+/// so each piece's corners are named in the buffer's order and it
+/// carries the buffer range it shows; the browser maps a click
+/// straight to buffer space, where touches land.
 enum FoldedScreenProjection {
     static func pieces(
         inner: ScreenLocalCorners,

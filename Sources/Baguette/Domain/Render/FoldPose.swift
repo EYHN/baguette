@@ -38,10 +38,13 @@ enum InterfaceRoll {
     static func degrees(_ orientation: DeviceOrientation, litPanel: IntegratedPanel) -> Double {
         let natural: DeviceOrientation = litPanel == .primary ? .portrait : .landscapeLeft
         let steps = ((cycle.firstIndex(of: orientation)! - cycle.firstIndex(of: natural)!) % 4 + 4) % 4
+        // Measured against Device Hub: one step of the cycle is the
+        // body turned a quarter turn clockwise on screen, which is a
+        // negative roll about the camera axis.
         switch steps {
-        case 1: return 90
+        case 1: return -90
         case 2: return 180
-        case 3: return -90
+        case 3: return 90
         default: return 0
         }
     }
