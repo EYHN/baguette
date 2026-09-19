@@ -195,6 +195,10 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             } ?? 0,
             textureSize: definition.scene.textureSize
         )
+        try Self.turnTextureCoordinates(
+            of: screen, materialIndex: self.screen.materialIndex,
+            by: definition.scene.textureRotation ?? 0
+        )
         if let fold = definition.scene.fold {
             guard let cover = Self.findScreenEntity(
                 under: subject, explicitName: nil, materialName: fold.coverMaterial
@@ -207,6 +211,10 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
                     $0.name == fold.coverMaterial
                 } ?? 0,
                 textureSize: fold.coverTextureSize
+            )
+            try Self.turnTextureCoordinates(
+                of: cover, materialIndex: coverScreen!.materialIndex,
+                by: fold.coverTextureRotation ?? 0
             )
             guard let clip = subject.availableAnimations.first(where: {
                 $0.name == fold.clip && $0.definition.duration.isFinite
@@ -256,10 +264,15 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             )
         )
 
+        // A book's leaf stands up toward the camera as it shuts, so a
+        // foldable is framed as deep as a leaf is wide.
+        let depth = definition.scene.fold == nil
+            ? Double(extents.z)
+            : max(Double(extents.z), Double(extents.x) / 2)
         let framing = DeviceCameraFraming.fit(
             subjectWidth: Double(extents.x),
             subjectHeight: Double(extents.y),
-            subjectDepth: Double(extents.z),
+            subjectDepth: depth,
             viewport: plan.outputSize
         )
         cameraFraming = framing
@@ -493,6 +506,36 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     }
 
     // MARK: - entity helpers
+
+    /// Turn a screen's texture coordinates by quarter turns, so frames
+    /// whose rows run the other way from the mesh's UVs read upright.
+    /// Rewrites only the parts on that material; skinning and the rest
+    /// of the mesh round-trip untouched.
+    @MainActor
+    private static func turnTextureCoordinates(
+        of entity: ModelEntity, materialIndex: Int, by degrees: Int
+    ) throws {
+        let turns = (((degrees / 90) % 4) + 4) % 4
+        guard turns != 0, var model = entity.model else { return }
+        var contents = model.mesh.contents
+        contents.models = .init(contents.models.map { mesh in
+            var mesh = mesh
+            mesh.parts = .init(mesh.parts.map { part in
+                guard part.materialIndex == materialIndex,
+                      let coordinates = part.textureCoordinates else { return part }
+                var part = part
+                part.textureCoordinates = .init(coordinates.elements.map { point in
+                    var u = point.x, v = point.y
+                    for _ in 0..<turns { (u, v) = (v, 1 - u) }
+                    return SIMD2<Float>(u, v)
+                })
+                return part
+            })
+            return mesh
+        })
+        try model.mesh.replace(with: contents)
+        entity.model = model
+    }
 
     @MainActor
     private static func findEntity(named name: String, under root: Entity) -> Entity? {

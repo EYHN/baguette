@@ -43,6 +43,23 @@ struct SharedHingeTests {
         wa.cancel(); wb.cancel()
     }
 
+    @Test func `a watcher joining a running monitor is told the standing angle at once`() {
+        // devicectl reports a change-driven stream: the standing angle
+        // comes once, at start. A socket that joins later — a 3D scene
+        // opened while the page's own socket already watches — would
+        // otherwise wait for the hinge to move before it could pose.
+        let inner = Inner()
+        let shared = SharedHinge(inner: inner.hinge)
+        let first = shared.watch { _ in }
+        inner.onAngle?(HingeAngle(degrees: 130))
+        let late = Seen()
+        let w = shared.watch { late.angles.append($0.degrees) }
+        #expect(late.angles == [130])
+        inner.onAngle?(HingeAngle(degrees: 120))
+        #expect(late.angles == [130, 120])
+        w.cancel(); first.cancel()
+    }
+
     @Test func `while watched, the angle is the last sample with no read`() {
         let inner = Inner()
         let shared = SharedHinge(inner: inner.hinge)

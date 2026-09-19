@@ -19,12 +19,14 @@
     "nativeOrientation": "landscape",
     "textureSize": {"width": 2007, "height": 2853},
     "usesScreenOverlay": false,
+    "textureRotation": 0,
     "restRotation": {"x": 90, "y": 0, "z": 0},
     "fold": {
       "clip": "l_over_r",
       "shutTime": 5.0,
       "coverMaterial": "YqugYDOqMSOpqyA",
       "coverTextureSize": {"width": 1398, "height": 2034},
+      "coverTextureRotation": 0,
       "openPoseDegrees": 130
     }
   },

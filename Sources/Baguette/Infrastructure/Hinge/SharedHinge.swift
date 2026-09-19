@@ -86,7 +86,11 @@ final class SharedHinge: Hinge, @unchecked Sendable {
         lock.lock()
         subscribers[id] = onAngle
         let startInner = innerWatch == nil
+        // The stream is change-driven: its standing angle came once, at
+        // start. A watcher joining a running monitor gets it now.
+        let standing = startInner ? nil : last?.angle
         lock.unlock()
+        if let standing { onAngle(standing) }
         if startInner {
             let started = inner.watch { [weak self] angle in self?.deliver(angle) }
             lock.lock()

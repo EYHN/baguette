@@ -1588,6 +1588,11 @@
   #simNativeView .r3d-live-stage[data-mode="interact"] .r3d-live-canvas {
     cursor: crosshair;
   }
+  /* Fixed 3D (a foldable's default view): straight on, no tools. */
+  #simNativeView #native3DStage[data-fixed="true"] .r3d-stage-tools,
+  #simNativeView #native3DStage[data-fixed="true"] .r3d-inspector-toggle {
+    display: none;
+  }
   #simNativeView .r3d-stage-tools {
     position: absolute; left: 14px; bottom: 14px; z-index: 3;
     display: flex; gap: 4px; padding: 4px;

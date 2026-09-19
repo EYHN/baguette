@@ -18,6 +18,11 @@
     this.rotation = { x: -8, y: 18, z: 0 };
     this.zoom = 1;
     this.mode = 'pose';
+    // Fixed: the device seen straight on, taps landing on its screen,
+    // no orbiting and no stage tools — the view a foldable gets by
+    // default, since its book is drawn from the same model the free
+    // 3D view orbits.
+    this.fixed = false;
     this.variants = {};
     this.screenGlass = false;
     // The size/fit/background the user picked in the toolbar, shared with
@@ -56,6 +61,7 @@
     this.onFps = options.onFps || null;
     this.format = options.format === 'avcc' ? 'avcc' : 'mjpeg';
     this.background = options.background || this.background;
+    if (options.fixed) this.setFixed(true, { silent: true });
     this.renderLoading('Loading 3D model…');
     try {
       const targetPath = (u, rest) => (window.BaguetteTarget
@@ -121,8 +127,31 @@
     });
   };
 
+  /**
+   * Straight on and still (fixed), or orbiting under the pointer (free).
+   * Switching keeps the socket: only the camera and the mode change.
+   */
+  Sim3DPanel.prototype.setFixed = function (fixed, opts) {
+    this.fixed = !!fixed;
+    if (this.stage) this.stage.dataset.fixed = this.fixed ? 'true' : 'false';
+    if (this.fixed) {
+      this.rotation = { x: 0, y: 0, z: 0 };
+      this.zoom = 1;
+      this.mode = 'interact';
+    } else {
+      this.rotation = { x: -8, y: 18, z: 0 };
+      this.zoom = 1;
+      this.mode = 'pose';
+    }
+    if (opts && opts.silent) return;
+    this.setMode(this.mode);
+    this.syncCameraControls();
+    this.sendCamera();
+  };
+
   Sim3DPanel.prototype.mountStage = function () {
     if (!this.stage) return;
+    this.stage.dataset.fixed = this.fixed ? 'true' : 'false';
     this.stage.innerHTML =
         '<canvas class="r3d-live-canvas" aria-label="Live 3D simulator"></canvas>' +
         '<div class="r3d-stage-tools" aria-label="3D interaction mode">' +

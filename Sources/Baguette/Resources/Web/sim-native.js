@@ -432,18 +432,14 @@
     // way the lit panel faces, and the page takes that instead.
     const hinge = deviceMode ? null : await readHinge();
     if (hinge && hinge.foldable) {
+      // A foldable is a book, and its book is Apple's own 3D model
+      // (`V68.usdz`, the one Device Hub draws) posed by the hinge, with
+      // both panels on its screens. So the page shows the live 3D
+      // stream straight on, taps landing on whichever screen is lit;
+      // the cube button lets it be turned.
       currentLitPanel = hinge.litPanel || 'primary';
-      if (hinge.orientation && hinge.orientation !== 'portrait') applyOrientation(hinge.orientation);
-      if (sim) {
-        const frame = document.getElementById('nativeDeviceFrame');
-        panels[currentLitPanel] = { sim, session, wrapper: frame.querySelector(':scope > div') };
-        void mountOtherPanel(currentLitPanel === 'primary' ? 'secondary' : 'primary');
-      }
-      if (currentLitPanel === 'secondary' && typeof hinge.angleDegrees === 'number') {
-        // A fresh visit to a device already bent.
-        latestAngle = hinge.angleDegrees;
-        oncePainted(() => settleAt(hinge.angleDegrees));
-      }
+      foldable = true;
+      if (sim && isBooted(meta.state)) toggle3D({ fixed: true });
     } else if (isBooted(meta.state)) {
       resetToPortrait();
     }
@@ -2385,13 +2381,27 @@
   // Live 3D is a main-view mode, not a duplicate preview. Its WebSocket
   // replaces the 2D StreamSession while open and carries both MJPEG
   // frames and the same inbound input/control envelopes.
-  function toggle3D() {
+  let foldable = false;
+  function toggle3D(opts) {
     const view = document.getElementById('simNativeView');
     const host = document.getElementById('native3DHost');
     const stage = document.getElementById('native3DStage');
     const btn = document.getElementById('native3DToggle');
     const open = view && view.getAttribute('data-render3d') === 'open';
     if (!view || !host || !stage || !sim) return;
+    const fixed = !!(opts && opts.fixed);
+    // A foldable lives in 3D: the cube turns the book, or sets it back
+    // straight, rather than leaving for the flat stream.
+    if (open && foldable && render3DPanel && !fixed) {
+      render3DPanel.setFixed(!render3DPanel.fixed);
+      if (btn) btn.classList.toggle('active', !render3DPanel.fixed);
+      const inspector = !render3DPanel.fixed && localStorage.getItem('asc.3dInspector') !== 'closed';
+      if (inspector) view.setAttribute('data-render3d-inspector', 'open');
+      else view.removeAttribute('data-render3d-inspector');
+      const sheet = document.getElementById('native3DSheet');
+      if (sheet) sheet.setAttribute('aria-hidden', inspector ? 'false' : 'true');
+      return;
+    }
     // The canvas being recorded is about to be swapped for the other
     // mode's, and the two are different surfaces at different sizes.
     cancelRecording('switched between 2D and 3D');
@@ -2409,13 +2419,13 @@
         session = null;
       }
       view.setAttribute('data-render3d', 'open');
-      const inspectorOpen = localStorage.getItem('asc.3dInspector') !== 'closed';
+      const inspectorOpen = !fixed && localStorage.getItem('asc.3dInspector') !== 'closed';
       if (inspectorOpen) {
         view.setAttribute('data-render3d-inspector', 'open');
       }
       const sheet = document.getElementById('native3DSheet');
       if (sheet) sheet.setAttribute('aria-hidden', inspectorOpen ? 'false' : 'true');
-      if (btn) btn.classList.add('active');
+      if (btn) btn.classList.toggle('active', !fixed);
       const status = document.getElementById('nativeStatus');
       if (status) status.textContent = '3D live';
       // Told BEFORE the stream starts: a picked size raises the
@@ -2431,6 +2441,7 @@
           deviceSize: { width: sim.screen.size.width, height: sim.screen.size.height },
           format: currentFormat(),
           background: live3DBackground(),
+          fixed,
           onFps: (fps) => {
             const status = document.getElementById('nativeStatus');
             if (status) status.textContent = fps + ' fps · 3D';
@@ -2438,6 +2449,7 @@
         });
       } else if (render3DPanel) {
         render3DPanel.background = live3DBackground();
+        if (render3DPanel.fixed !== fixed) render3DPanel.setFixed(fixed, { silent: true });
         render3DPanel.start();
       }
     }
