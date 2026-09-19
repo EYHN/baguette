@@ -57,11 +57,11 @@ struct SimulatorDefinitionTests {
     @Test func `screen carries a mask image url when the chrome has a mask`() throws {
         let def = Self.composeFixture(screenMask: ChromeImage(
             data: Data("MASK".utf8), size: Size(width: 466, height: 678)))
-        #expect(def.screen.maskImage == "/simulators/UDID-1/screen-mask.png")
+        #expect(def.screen.maskImage == "/simulators/UDID-1/screen-mask.png?panel=primary")
         let json = try #require(def.toJSON().data(using: .utf8))
         let root = try #require(try JSONSerialization.jsonObject(with: json) as? [String: Any])
         let screen = try #require(root["screen"] as? [String: Any])
-        #expect(screen["maskImage"] as? String == "/simulators/UDID-1/screen-mask.png")
+        #expect(screen["maskImage"] as? String == "/simulators/UDID-1/screen-mask.png?panel=primary")
     }
 
     @Test func `screen has no mask image when the chrome has none`() throws {
@@ -80,6 +80,25 @@ struct SimulatorDefinitionTests {
         #expect(Self.composeFixture(panel: .secondary).screen.crease == true)
         #expect(Self.composeFixture(panel: .primary).screen.crease == false)
         #expect(Self.composeFixture().screen.crease == false)
+    }
+
+    /// `bezel.png` is cached for a day, so an image URL must always mean
+    /// one panel: a plain URL that served "whichever panel is lit" came
+    /// back from the browser cache as the wrong bezel after every fold.
+    /// Every panel's images name their panel — the primary's included.
+    @Test func `the unfolded panel's image urls name their panel`() throws {
+        let def = Self.composeFixture(
+            screenMask: ChromeImage(data: Data("MASK".utf8), size: Size(width: 1, height: 1)),
+            panel: .secondary)
+        #expect(def.screen.bezelImage.rest == "/simulators/UDID-1/bezel.png?panel=secondary")
+        #expect(def.screen.bezelImage.bare == "/simulators/UDID-1/bezel.png?buttons=false&panel=secondary")
+        #expect(def.screen.maskImage == "/simulators/UDID-1/screen-mask.png?panel=secondary")
+    }
+
+    @Test func `the primary panel's image urls name it too`() throws {
+        let def = Self.composeFixture(panel: .primary)
+        #expect(def.screen.bezelImage.rest == "/simulators/UDID-1/bezel.png?panel=primary")
+        #expect(def.screen.bezelImage.bare == "/simulators/UDID-1/bezel.png?buttons=false&panel=primary")
     }
 
     @Test func `screen rect is in bare-bezel coordinates`() {
@@ -109,8 +128,8 @@ struct SimulatorDefinitionTests {
 
     @Test func `screen bezel image URLs are scoped to the simulator's udid`() {
         let def = Self.composeFixture()
-        #expect(def.screen.bezelImage.rest == "/simulators/UDID-1/bezel.png")
-        #expect(def.screen.bezelImage.bare == "/simulators/UDID-1/bezel.png?buttons=false")
+        #expect(def.screen.bezelImage.rest == "/simulators/UDID-1/bezel.png?panel=primary")
+        #expect(def.screen.bezelImage.bare == "/simulators/UDID-1/bezel.png?buttons=false&panel=primary")
     }
 
     // MARK: - buttons
@@ -136,11 +155,11 @@ struct SimulatorDefinitionTests {
 
     @Test func `button image URLs route through the per-udid chrome-button path`() {
         let def = Self.composeFixtureWithButtons()
-        #expect(def.buttons[0].images.rest    == "/simulators/UDID-1/chrome-button/power.png")
-        #expect(def.buttons[0].images.pressed == "/simulators/UDID-1/chrome-button/power-down.png")
+        #expect(def.buttons[0].images.rest    == "/simulators/UDID-1/chrome-button/power.png?panel=primary")
+        #expect(def.buttons[0].images.pressed == "/simulators/UDID-1/chrome-button/power-down.png?panel=primary")
         // Volume-up has no imageDown in this fixture — pressed falls
         // back to rest so the JS SDK's swap is a no-op.
-        #expect(def.buttons[1].images.pressed == "/simulators/UDID-1/chrome-button/volume-up.png")
+        #expect(def.buttons[1].images.pressed == "/simulators/UDID-1/chrome-button/volume-up.png?panel=primary")
     }
 
     @Test func `button z-order maps the chrome's onTop flag to a domain enum`() {
@@ -453,7 +472,7 @@ extension SimulatorDefinitionTests {
         #expect(def.identity.udid == "U1")
         #expect(def.identity.name == "han's iPhone")
         #expect(def.identity.model == "iPhone14,3")
-        #expect(def.screen.bezelImage.rest == "/devices/U1/bezel.png")
+        #expect(def.screen.bezelImage.rest == "/devices/U1/bezel.png?panel=primary")
         #expect(def.screen.viewport == Size(width: 400, height: 800))
     }
 }

@@ -259,6 +259,14 @@ extension SimulatorDefinition {
         )
     }
 
+    /// The query that names the panel on every image URL. `bezel.png`
+    /// and the button images are cached for a day, so a URL must always
+    /// mean one panel — a plain URL that served whichever panel was lit
+    /// came back from the cache as the wrong bezel after every fold.
+    private static func panelQuery(_ panel: IntegratedPanel, first: Bool) -> String {
+        (first ? "?" : "&") + "panel=" + (panel == .primary ? "primary" : "secondary")
+    }
+
     /// Identity-first flavor for surfaces that aren't simulators — a
     /// physical device borrows a user-picked chrome, and its identity
     /// comes from the companion's hello rather than CoreSimulator.
@@ -289,11 +297,12 @@ extension SimulatorDefinition {
                 rect:       screenRect,
                 clipRadius: chrome.innerCornerRadius,
                 buttonMargins: m,
-                maskImage: assets.screenMask == nil ? nil : "\(urlPrefix)/screen-mask.png",
+                maskImage: assets.screenMask == nil ? nil
+                    : "\(urlPrefix)/screen-mask.png" + panelQuery(panel, first: true),
                 crease: panel == .secondary,
                 bezelImage: BezelImage(
-                    rest: "\(urlPrefix)/bezel.png",
-                    bare: "\(urlPrefix)/bezel.png?buttons=false"
+                    rest: "\(urlPrefix)/bezel.png" + panelQuery(panel, first: true),
+                    bare: "\(urlPrefix)/bezel.png?buttons=false" + panelQuery(panel, first: false)
                 )
             ),
             buttons: chrome.buttons.compactMap { b in
@@ -301,7 +310,8 @@ extension SimulatorDefinition {
                     fromChrome: b,
                     imageSize: assets.buttonImages[b.name]?.size,
                     bareSize: bare,
-                    urlPrefix: urlPrefix
+                    urlPrefix: urlPrefix,
+                    query: panelQuery(panel, first: true)
                 )
             },
             keyboard: Self.keyboard(for: chrome.identifier)
@@ -328,11 +338,14 @@ extension SimulatorDefinition.Button {
     /// a known wire button — keeps the SDK surface honest (no
     /// inert "tooltip-only" buttons; if it isn't wired, it isn't
     /// in the definition).
+    /// `query` is appended to every image URL — the unfolded panel's
+    /// `?panel=secondary`, empty for the primary.
     init?(
         fromChrome b: ChromeButton,
         imageSize: Size?,
         bareSize: Size,
-        urlPrefix: String
+        urlPrefix: String,
+        query: String = ""
     ) {
         guard let wire = Self.wireButton(for: b.name) else { return nil }
         // The button overlay needs a real image size to size its
@@ -347,10 +360,10 @@ extension SimulatorDefinition.Button {
             id: b.name,
             envelope: ["type": "button", "button": wire],
             images: SimulatorDefinition.ButtonImages(
-                rest:    "\(urlPrefix)/chrome-button/\(b.name).png",
+                rest:    "\(urlPrefix)/chrome-button/\(b.name).png\(query)",
                 pressed: b.imageDownName != nil
-                    ? "\(urlPrefix)/chrome-button/\(b.name)-down.png"
-                    : "\(urlPrefix)/chrome-button/\(b.name).png"
+                    ? "\(urlPrefix)/chrome-button/\(b.name)-down.png\(query)"
+                    : "\(urlPrefix)/chrome-button/\(b.name).png\(query)"
             ),
             box: Self.box(for: b, imageSize: imageSize, bareSize: bareSize),
             transform: Self.transform(for: b, imageSize: imageSize),

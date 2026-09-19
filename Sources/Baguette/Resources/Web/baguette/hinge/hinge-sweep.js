@@ -12,6 +12,8 @@
   'use strict';
 
   const SWAP_DEGREES = 90;
+  /** Device Hub's open pose, measured; the bend is centred from here up. */
+  const OPEN_POSE_DEGREES = 130;
 
   class HingeSweep {
     constructor(samples) {
@@ -29,9 +31,18 @@
      * turns positive and the right negative.
      */
     static leafTransforms(degrees) {
-      const half = Math.max(0, Math.min(180, 180 - degrees)) / 2;
-      const deg = Math.round(half * 100) / 100;
-      return { left: `rotateY(${deg}deg)`, right: `rotateY(${-deg}deg)` };
+      const fold = Math.max(0, Math.min(180, 180 - degrees));
+      const half = fold / 2;
+      // Above the open pose the bend is centred. Below it the book is
+      // shutting: the cover is the back of the left half, so the left
+      // leaf folds over onto the right, taking the right leaf's share
+      // of the bend as the angle falls — ±half at the open pose, the
+      // whole fold on the left and the right flat when shut.
+      const share = Math.max(0, Math.min(1, degrees / OPEN_POSE_DEGREES));
+      const right = -half * share;
+      const left = fold + right;
+      const r = (v) => Math.round(v * 100) / 100;
+      return { left: `rotateY(${r(left)}deg)`, right: `rotateY(${r(right)}deg)` };
     }
 
     push(degrees, atMs) {
@@ -71,4 +82,5 @@
   root.Baguette = root.Baguette || {};
   root.Baguette.HingeSweep = HingeSweep;
   root.Baguette.HINGE_SWAP_DEGREES = SWAP_DEGREES;
+  root.Baguette.HINGE_OPEN_POSE_DEGREES = OPEN_POSE_DEGREES;
 })(window);

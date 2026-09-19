@@ -20,14 +20,31 @@ function load() {
 // from these samples, and replays a recorded sweep on the panel it
 // arrives at after the swap.
 
-test('both leaves turn about the seam by half the fold: flat at 180°, edge-on at 0°', () => {
+test('between open and flat both leaves take half the bend, spine centred', () => {
   const { HingeSweep } = load();
-  // Device Hub's bend is centred — the spine stays put and both
-  // pages rise toward the viewer. Positive rotateY brings the left
-  // edge forward, negative the right, so the two get opposite halves.
+  // Device Hub's open poses are a centred bend: the spine stays put
+  // and both pages rise toward the viewer. Positive rotateY brings an
+  // element's left edge forward, negative its right, so the leaves
+  // get opposite halves.
   assert.deepEqual(HingeSweep.leafTransforms(180), { left: 'rotateY(0deg)', right: 'rotateY(0deg)' });
+  assert.deepEqual(HingeSweep.leafTransforms(155), { left: 'rotateY(12.5deg)', right: 'rotateY(-12.5deg)' });
   assert.deepEqual(HingeSweep.leafTransforms(130), { left: 'rotateY(25deg)', right: 'rotateY(-25deg)' });
-  assert.deepEqual(HingeSweep.leafTransforms(0), { left: 'rotateY(90deg)', right: 'rotateY(-90deg)' });
+});
+
+test('closing past the open pose, the left leaf folds over onto the right', () => {
+  const { HingeSweep } = load();
+  // The cover is the back of the left half: shutting the book lays the
+  // left leaf onto the right, which settles flat. The right leaf's
+  // share of the bend hands over to the left as the angle falls, so
+  // the motion is continuous from the open pose down to shut.
+  assert.deepEqual(HingeSweep.leafTransforms(0), { left: 'rotateY(180deg)', right: 'rotateY(0deg)' });
+  assert.deepEqual(HingeSweep.leafTransforms(65), { left: 'rotateY(86.25deg)', right: 'rotateY(-28.75deg)' });
+  // Sum of turns is always the fold.
+  for (const a of [0, 30, 65, 100, 130, 160, 180]) {
+    const t = HingeSweep.leafTransforms(a);
+    const deg = (s) => parseFloat(s.replace('rotateY(', ''));
+    assert.ok(Math.abs(deg(t.left) - deg(t.right) - (180 - a)) < 0.02, `angle ${a}`);
+  }
 });
 
 test('a sweep records samples with their times and knows its direction', () => {

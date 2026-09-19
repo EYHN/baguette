@@ -184,7 +184,14 @@ extension Simulator {
     /// Returns `nil` for devices without a matching DeviceKit chrome
     /// (e.g. Apple TV).
     func chrome(in chromes: any Chromes) -> DeviceChromeAssets? {
-        switch litPanel(in: chromes) {
+        chrome(in: chromes, panel: litPanel(in: chromes))
+    }
+
+    /// One named panel's chrome, hinge not consulted. Image routes take
+    /// the panel from the URL the definition handed out, so a cached
+    /// `bezel.png` can never be the other panel's.
+    func chrome(in chromes: any Chromes, panel: IntegratedPanel) -> DeviceChromeAssets? {
+        switch panel {
         case .primary:   return chromes.assets(forDeviceName: deviceTypeName)
         case .secondary: return chromes.assets(forDeviceName: deviceTypeName, panel: .secondary)
         }

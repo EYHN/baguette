@@ -497,7 +497,12 @@
   // cover simply rises. The poll below stays as the fallback for a
   // page whose socket is not up.
   const FOLD_KEY = 'baguette.hinge.transition';
-  const SWEEP_QUIET_MS = 300;
+  // A sweep's tail is sparse: Device Hub eases out and the monitor
+  // reports only changes ≥ 0.1°, so the last samples arrive up to
+  // ~0.5 s apart (measured 4.6° → 2.0° over 0.48 s). A shorter window
+  // called the sweep settled mid-fold and reloaded with the leaf still
+  // turning.
+  const SWEEP_QUIET_MS = 750;
   let currentLitPanel = 'primary';
   let foldView = null;
   let liveSweep = null;

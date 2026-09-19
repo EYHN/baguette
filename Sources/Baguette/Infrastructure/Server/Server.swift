@@ -572,7 +572,8 @@ struct Server: Sendable {
         router.get("/simulators/:udid/screen-mask.png") { [simulators, chromes] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
             guard let bytes = Self.screenMaskImage(
-                udid: Self.udidParam(r), simulators: simulators, chromes: chromes
+                udid: Self.udidParam(r), simulators: simulators, chromes: chromes,
+                panel: Self.panelQuery(r.uri.queryParameters.get("panel").map { String($0) })
             ) else {
                 return Response(
                     status: .notFound,
@@ -598,7 +599,8 @@ struct Server: Sendable {
                 udid: Self.udidParam(r),
                 simulators: simulators,
                 chromes: chromes,
-                withButtons: withButtons
+                withButtons: withButtons,
+                panel: Self.panelQuery(r.uri.queryParameters.get("panel").map { String($0) })
             )
         }
         // Per-button rasterized PNG — feeds the actionable-bezel UI.
@@ -624,7 +626,8 @@ struct Server: Sendable {
                 udid: udid,
                 buttonFile: last,
                 simulators: simulators,
-                chromes: chromes
+                chromes: chromes,
+                panel: Self.panelQuery(r.uri.queryParameters.get("panel").map { String($0) })
             )
         }
 
@@ -1510,6 +1513,16 @@ struct Server: Sendable {
     /// Reporting an unknown device as one with no conditioning would read
     /// as reassurance about a simulator that doesn't exist, which is the
     /// wrong answer to give a badge whose whole job is being believed.
+    /// `?panel=` on an image route: the panel the definition named.
+    /// Anything else is ignored and the hinge decides, as before.
+    static func panelQuery(_ raw: String?) -> IntegratedPanel? {
+        switch raw {
+        case "primary": return .primary
+        case "secondary": return .secondary
+        default: return nil
+        }
+    }
+
     /// One hinge sample as the stream socket pushes it to the page.
     static func hingeMessage(_ angle: HingeAngle) -> String {
         #"{"type":"hinge","angleDegrees":\#(angle.degrees)}"#
@@ -2488,11 +2501,12 @@ struct Server: Sendable {
         udid: String,
         simulators: any Simulators,
         chromes: any Chromes,
-        withButtons: Bool = true
+        withButtons: Bool = true,
+        panel: IntegratedPanel? = nil
     ) -> Response {
         guard let bytes = bezelImage(
             udid: udid, simulators: simulators,
-            chromes: chromes, withButtons: withButtons
+            chromes: chromes, withButtons: withButtons, panel: panel
         ) else {
             return Response(
                 status: .notFound,
@@ -2520,13 +2534,23 @@ struct Server: Sendable {
         udid: String,
         simulators: any Simulators,
         chromes: any Chromes,
-        withButtons: Bool
+        withButtons: Bool,
+        panel: IntegratedPanel? = nil
     ) -> Data? {
         guard !udid.isEmpty, let sim = simulators.find(udid: udid),
-              let assets = sim.chrome(in: chromes) else {
+              let assets = chrome(of: sim, in: chromes, panel: panel) else {
             return nil
         }
         return withButtons ? assets.composite.data : assets.bareComposite.data
+    }
+
+    /// The named panel's chrome when the URL names one, else the lit
+    /// panel's.
+    private static func chrome(
+        of sim: any Simulator, in chromes: any Chromes, panel: IntegratedPanel?
+    ) -> DeviceChromeAssets? {
+        if let panel { return sim.chrome(in: chromes, panel: panel) }
+        return sim.chrome(in: chromes)
     }
 
     /// Pure data producer for `screen-mask.png`: the lit panel's mask,
@@ -2534,10 +2558,11 @@ struct Server: Sendable {
     static func screenMaskImage(
         udid: String,
         simulators: any Simulators,
-        chromes: any Chromes
+        chromes: any Chromes,
+        panel: IntegratedPanel? = nil
     ) -> Data? {
         guard !udid.isEmpty, let sim = simulators.find(udid: udid),
-              let assets = sim.chrome(in: chromes) else {
+              let assets = chrome(of: sim, in: chromes, panel: panel) else {
             return nil
         }
         return assets.screenMask?.data
@@ -2547,11 +2572,12 @@ struct Server: Sendable {
         udid: String,
         buttonFile: String,
         simulators: any Simulators,
-        chromes: any Chromes
+        chromes: any Chromes,
+        panel: IntegratedPanel? = nil
     ) -> Response {
         guard let bytes = chromeButtonImage(
             udid: udid, buttonFile: buttonFile,
-            simulators: simulators, chromes: chromes
+            simulators: simulators, chromes: chromes, panel: panel
         ) else {
             return Response(
                 status: .notFound,
@@ -2578,10 +2604,11 @@ struct Server: Sendable {
         udid: String,
         buttonFile: String,
         simulators: any Simulators,
-        chromes: any Chromes
+        chromes: any Chromes,
+        panel: IntegratedPanel? = nil
     ) -> Data? {
         guard !udid.isEmpty, let sim = simulators.find(udid: udid),
-              let assets = sim.chrome(in: chromes) else {
+              let assets = chrome(of: sim, in: chromes, panel: panel) else {
             return nil
         }
         let name: String = {
