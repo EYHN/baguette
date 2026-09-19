@@ -7,6 +7,9 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
     private let host: any DeviceHost
     private let enumerateIO: () throws -> String
     private let hinge: any Hinge
+    /// A foldable's hardware keys, when the guest tool is there to
+    /// press them; see `FoldableInput`.
+    private let keys: (any DeviceKeys)?
     /// When set, the lit panel is this one and the hinge is not asked —
     /// see `Displays.panel(_:)`.
     private let pinnedPanel: IntegratedPanel?
@@ -19,6 +22,7 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
         host: any DeviceHost,
         enumerateIO: @escaping () throws -> String,
         hinge: any Hinge,
+        keys: (any DeviceKeys)? = nil,
         pinnedPanel: IntegratedPanel? = nil
     ) {
         self.kind = kind
@@ -26,6 +30,7 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
         self.host = host
         self.enumerateIO = enumerateIO
         self.hinge = hinge
+        self.keys = keys
         self.pinnedPanel = pinnedPanel
     }
 
@@ -71,16 +76,23 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
     ///
     /// Which registration the phone plane addresses depends on how many
     /// panels the device has — see `boundPanelScreenId`.
+    ///
+    /// On a foldable the hardware keys go to the guest as well — the
+    /// legacy press lands on a touchscreen service there and SpringBoard
+    /// ignores it — so the panel's input is wrapped in `FoldableInput`.
     func input() -> any Input {
+        let panel = boundPanelScreenId()
         let target = DisplayTouchTarget.resolve(
             kind: kind,
-            connectedScreenId: boundPanelScreenId(),
+            connectedScreenId: panel,
             derive: { _ in nil },
             override: DisplayTouchTarget.parseOverride(
                 ProcessInfo.processInfo.environment["BAGUETTE_CARPLAY_TARGET"]
             )
         ) ?? IndigoHIDTouchTarget.phone
-        return IndigoHIDInput(udid: udid, host: host, touchTarget: target, plane: kind)
+        let touches = IndigoHIDInput(udid: udid, host: host, touchTarget: target, plane: kind)
+        guard panel != nil, let keys else { return touches }
+        return FoldableInput(touches: touches, keys: keys)
     }
 
     /// The phone plane's panel, when the device has more than one.

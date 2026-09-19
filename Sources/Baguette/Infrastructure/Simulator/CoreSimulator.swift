@@ -95,13 +95,13 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
     }
 
     func displays() -> any Displays {
-        SimulatorKitDisplays(udid: udid, host: host, hinge: hinge())
+        SimulatorKitDisplays(udid: udid, host: host, hinge: hinge(), keys: GuestHingeMotor.forDevice(udid))
     }
 
     /// One monitor per device: sockets share a watch and binds read the
     /// last sample while it runs. See `SharedHinge`.
     func hinge() -> any Hinge {
-        SharedHinge.forDevice(udid, make: { DevicectlHinge(udid: udid) }, motor: GuestHingeMotor(udid: udid))
+        SharedHinge.forDevice(udid, make: { DevicectlHinge(udid: udid) }, motor: GuestHingeMotor.forDevice(udid))
     }
 
     func externalDisplays() -> any ExternalDisplays {

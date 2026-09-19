@@ -2,9 +2,11 @@ import Foundation
 
 /// Device Hub's pose picker, on the page: `{"type":"set_pose","hingeDegrees":130}`
 /// on the 3D socket, beside `set_3d_camera`, moves the device's hinge
-/// there (`Hinge.fold`); the book follows the hinge as it sweeps.
+/// there (`Hinge.fold`); the book follows the hinge as it sweeps. The
+/// picker leaves `duration` out and gets Device Hub's sweep; the hinge
+/// slider sends `"duration":0` to put the hinge where the thumb is.
 enum Device3DPose: Equatable, Sendable {
-    case fold(hingeDegrees: Double)
+    case fold(hingeDegrees: Double, duration: TimeInterval?)
 
     static func parsing(json: Data) throws -> Device3DPose? {
         let object: [String: Any]
@@ -21,7 +23,14 @@ enum Device3DPose: Equatable, Sendable {
         guard let degrees, degrees.isFinite, (0...180).contains(degrees) else {
             throw DeviceModelError.invalidRenderOptions
         }
-        return .fold(hingeDegrees: degrees)
+        var duration: TimeInterval?
+        if let raw = object["duration"] {
+            guard let seconds = (raw as? Double) ?? (raw as? Int).map(Double.init),
+                  seconds.isFinite, seconds >= 0
+            else { throw DeviceModelError.invalidRenderOptions }
+            duration = seconds
+        }
+        return .fold(hingeDegrees: degrees, duration: duration)
     }
 }
 

@@ -202,8 +202,9 @@
   /**
    * The model's hardware buttons, where the server says they land in
    * the frame: a control per button, pressed like the flat chrome's.
-   * Shown while the pointer is over the stage, as Device Hub shows
-   * them; the server moves them as the book turns.
+   * Drawn as Device Hub draws them — a bare glyph beside the device,
+   * shown while the pointer is over the stage, lit when over the
+   * glyph; the server moves them as the book turns.
    */
   Sim3DPanel.prototype.placeButtons = function (buttons) {
     if (!this.stage || !this.canvas) return;
@@ -215,10 +216,6 @@
       host.className = 'r3d-hw-buttons';
       this.stage.appendChild(host);
     }
-    const GLYPH = {
-      'power': '\u23FB', 'action': '\u25CE',
-      'volume-up': '\uD83D\uDD0A+', 'volume-down': '\uD83D\uDD09\u2212',
-    };
     const LABEL = {
       'power': 'Sleep/Wake', 'action': 'Camera Control',
       'volume-up': 'Volume Up', 'volume-down': 'Volume Down',
@@ -237,7 +234,7 @@
         el.className = 'r3d-hw-button';
         el.title = LABEL[b.id] || b.id;
         el.setAttribute('aria-label', el.title);
-        el.textContent = GLYPH[b.id] || b.id;
+        el.innerHTML = this.buttonGlyph(b.id);
         el.addEventListener('click', (event) => {
           event.stopPropagation();
           this.send({ type: 'button', button: b.id });
@@ -254,11 +251,33 @@
     });
   };
 
+  /** Device Hub's glyphs for the keys: speaker −/+, a lock, a camera. */
+  Sim3DPanel.prototype.buttonGlyph = function (id) {
+    const base = 'width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"';
+    const speaker = '<path d="M2.5 6.5h2.8L9 3.5v11L5.3 11.5H2.5z"/>';
+    if (id === 'volume-down') {
+      return '<svg ' + base + '>' + speaker + '<path d="M11.5 9h4"/></svg>';
+    }
+    if (id === 'volume-up') {
+      return '<svg ' + base + '>' + speaker + '<path d="M11.5 9h4M13.5 7v4"/></svg>';
+    }
+    if (id === 'action') {
+      return '<svg ' + base + '><path d="M2.5 6.5h3l1.5-2h4l1.5 2h3v8h-13z"/>' +
+          '<circle cx="9" cy="10.2" r="2.4"/></svg>';
+    }
+    // power: Device Hub shows the lock it drives.
+    return '<svg ' + base + '><rect x="4" y="8" width="10" height="7.5" rx="1.5"/>' +
+        '<path d="M6 8V5.8a3 3 0 0 1 6 0V8"/></svg>';
+  };
+
   /**
-   * Device Hub's pose picker, under the book: shut, open (its 130°
-   * book pose) and flat. A pick moves the device's own hinge there —
-   * the server sweeps it as Device Hub would — and the book follows the
-   * hinge as it goes; the pose nearest the hinge lights up.
+   * Device Hub's pose bar, under the book: shut, open (its 130° book
+   * pose) and flat, then the hinge slider. A pick sweeps the device's
+   * own hinge there — the server plays it as Device Hub would — and the
+   * slider puts the hinge where the thumb is as it is dragged; the book
+   * follows the hinge either way, the pose nearest the hinge lights up
+   * and the slider tracks it whenever nobody is holding it.
    */
   Sim3DPanel.prototype.placePosePicker = function (pose) {
     if (!this.stage) return;
@@ -286,6 +305,33 @@
         });
         host.appendChild(btn);
       });
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '0'; slider.max = '180'; slider.step = '1';
+      slider.dataset.role = 'hinge-slider';
+      slider.title = 'Hinge angle';
+      slider.setAttribute('aria-label', 'Hinge angle');
+      // Held: the thumb leads and the hinge follows, a few times a
+      // frame at most; released: the hinge leads again.
+      let timer = null;
+      let last = null;
+      const push = () => {
+        timer = null;
+        const degrees = Number(slider.value);
+        if (degrees === last) return;
+        last = degrees;
+        this.send({ type: 'set_pose', hingeDegrees: degrees, duration: 0 });
+      };
+      slider.addEventListener('pointerdown', () => { slider.dataset.held = 'true'; });
+      const release = () => { delete slider.dataset.held; if (!timer) push(); };
+      slider.addEventListener('pointerup', release);
+      slider.addEventListener('pointercancel', release);
+      slider.addEventListener('input', () => {
+        slider.dataset.held = 'true';
+        if (!timer) timer = setTimeout(push, 40);
+      });
+      slider.addEventListener('change', release);
+      host.appendChild(slider);
       this.stage.appendChild(host);
     }
     // Nearest pose to the angle shown lights up.
@@ -296,9 +342,10 @@
     host.querySelectorAll('[data-pose]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.pose === nearest.id);
     });
+    const slider = host.querySelector('[data-role="hinge-slider"]');
+    if (slider && !slider.dataset.held) slider.value = String(Math.round(deg));
   };
 
-  /** Device Hub's three pose glyphs: a shut phone, an open book, a flat slab. */
   Sim3DPanel.prototype.poseGlyph = function (id) {
     const base = 'width="20" height="16" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"';
     if (id === 'shut') {

@@ -8,20 +8,25 @@ final class SimulatorKitDisplays: Displays, @unchecked Sendable {
     private let udid: String
     private let host: any DeviceHost
     private let hinge: any Hinge
+    private let keys: (any DeviceKeys)?
     private let enumerateIO: () throws -> String
 
-    init(udid: String, host: any DeviceHost, hinge: any Hinge) {
+    /// `keys` presses a foldable's hardware keys through the guest; a
+    /// display with several panels routes buttons there.
+    init(udid: String, host: any DeviceHost, hinge: any Hinge, keys: (any DeviceKeys)? = nil) {
         let enumerateIO = { try SimctlIOCapture.enumerate(udid: udid) }
         self.udid = udid
         self.host = host
         self.hinge = hinge
+        self.keys = keys
         self.enumerateIO = enumerateIO
         self.phone = SimulatorKitDisplay(
             kind: .phone,
             udid: udid,
             host: host,
             enumerateIO: enumerateIO,
-            hinge: hinge
+            hinge: hinge,
+            keys: keys
         )
         self.carPlay = SimulatorKitDisplay(
             kind: .carPlay,
@@ -39,6 +44,7 @@ final class SimulatorKitDisplays: Displays, @unchecked Sendable {
             host: host,
             enumerateIO: enumerateIO,
             hinge: hinge,
+            keys: keys,
             pinnedPanel: panel
         )
     }

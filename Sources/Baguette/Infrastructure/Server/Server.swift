@@ -2845,6 +2845,32 @@ struct Server: Sendable {
             try? await outbound.write(.text(json))
         }
 
+        // Pose requests play in the order they came, one at a time: a
+        // slider drag sends a burst of them, and detached tasks racing
+        // for the motor would leave the hinge wherever the last to win
+        // said, not where the thumb stopped. A request the burst has
+        // already passed is skipped, so the hinge catches up to the
+        // thumb rather than replaying its path.
+        final class PoseQueue: @unchecked Sendable {
+            private let lock = NSLock()
+            private var tail: Task<Void, Never>?
+            private var newest = 0
+            func enqueue(_ drive: @escaping @Sendable () -> Void) {
+                lock.lock()
+                newest += 1
+                let mine = newest
+                let previous = tail
+                let task = Task.detached { [self] in
+                    await previous?.value
+                    let stale = self.lock.withLock { mine != self.newest }
+                    if !stale { drive() }
+                }
+                tail = task
+                lock.unlock()
+            }
+        }
+        let poses = PoseQueue()
+
         do {
             for try await frame in inbound {
                 guard frame.opcode == .text else { continue }
@@ -2864,11 +2890,12 @@ struct Server: Sendable {
                     // there (a second or so, off this loop); the book
                     // follows the hinge samples as it goes.
                     if foldable != nil, let pose = try Device3DPose.parsing(json: Data(line.utf8)) {
-                        if case .fold(let degrees) = pose {
+                        if case .fold(let degrees, let duration) = pose {
                             let target = String(degrees)
-                            Task.detached {
+                            let over = duration.map { String($0) }
+                            poses.enqueue {
                                 let outcome = Self.driveHinge(
-                                    udid: udid, pose: nil, angle: target, duration: nil,
+                                    udid: udid, pose: nil, angle: target, duration: over,
                                     simulators: simulators)
                                 if outcome != .ok { log("hinge: \(outcome)") }
                             }

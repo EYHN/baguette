@@ -34,6 +34,15 @@ For releases prior to this changelog, see the
   `scene.textureRotation`, `scene.fold` and `scene.buttons`; the 3D
   socket's `screen_quad` gains `pieces`, `buttons` and `litPanel`, and
   `set_3d_camera` takes `orientation`.
+- **iPhone Duo's hardware keys work.** The legacy Indigo press reaches
+  the guest on a touchscreen service and SpringBoard ignores it there;
+  Device Hub presses volume, power and the camera control as keyboard
+  events on `dtuhidd`'s `mainScreenButtons` service, and `HingeControl`
+  now does the same (`button <page> <usage> <ms>`). `DeviceKeys` is the
+  new domain role, `FoldableInput` routes a foldable's `button` gestures
+  through it (CLI, `POST …/input` and the sockets alike), and the page
+  draws the controls as Device Hub does. The pose bar gains Device Hub's
+  hinge slider (`set_pose` with `"duration":0`).
 
 ### Added
 

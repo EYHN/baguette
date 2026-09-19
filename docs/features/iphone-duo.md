@@ -216,7 +216,21 @@ Device Hub is its own, and the page's button brings the two into step.
 swept over Device Hub's 0.8 s by `HingeControl` inside the guest — see
 [`hinge.md`](hinge.md)); SpringBoard swaps panels and the book follows
 the hinge samples as it goes. `screen_quad` carries `pose:
-{hingeDegrees}` so the nearest pose lights up.
+{hingeDegrees}` so the nearest pose lights up. Beside the three poses
+sits Device Hub's **hinge slider**: dragging it sends
+`{"type":"set_pose","hingeDegrees":72,"duration":0}` a few times a
+frame at most, and the hinge goes straight to the thumb (no sweep);
+pose requests on a socket play in order and skip what the burst has
+already passed, so the hinge catches up to the thumb rather than
+replaying its path. Released, the slider follows the hinge again.
+
+**Hardware keys.** The controls beside the device are drawn as Device
+Hub draws them — a grey glyph (speaker −/+, lock, camera) that shows
+while the pointer is over the stage and lights under the pointer — and
+they work: on the Duo the legacy Indigo press is ignored by SpringBoard,
+so a foldable's input presses these keys through the guest the way
+Device Hub does (`FoldableInput` → `DeviceKeys` → `HingeControl button`;
+see [`hinge.md`](hinge.md)).
 
 Known gaps: the hinge's motion stream can stop after a SpringBoard
 restart (`baguette heal`) — `devicectl` then reports nothing until

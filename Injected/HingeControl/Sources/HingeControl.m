@@ -21,9 +21,19 @@
 // 0x09 string (aux = length), 0x04 double (aux = 0x3f, 8 bytes LE).
 // Every item is padded to 4 bytes.
 //
+// The hardware keys go the same way. dtuhidd also owns a
+// `mainScreenButtons` service (usage page 0x0B, usage 0x01, built-in),
+// and Device Hub's volume, power and camera-control buttons are plain
+// keyboard IOHIDEvents on it — consumer page 0x0C usages 0xE9 / 0xEA /
+// 0x30, and Apple's vendor keyboard page 0xFF00 usage 0x66 — held a
+// quarter second. SpringBoard takes them only from a service of that
+// shape: the legacy Indigo press reaches backboardd on a touchscreen
+// service and is ignored. A second service here presses them.
+//
 //   HingeControl angle <degrees>
 //   HingeControl sweep <from> <to> <milliseconds>     (60 Hz, ease-out)
 //   HingeControl orientation <portrait|landscapeLeft|landscapeRight|portraitUpsideDown>
+//   HingeControl button <usagePage> <usage> <milliseconds>
 //   HingeControl serve        — the same verbs, one per line on stdin,
 //                               until EOF; baguette keeps one of these
 //                               per device so a pose costs no spawn.
@@ -35,6 +45,7 @@
 
 typedef void *IOHIDEventRef;
 static IOHIDEventRef (*IOHIDEventCreateVendorDefinedEvent)(CFAllocatorRef, uint64_t, uint32_t, uint32_t, uint32_t, uint8_t *, CFIndex, uint32_t);
+static IOHIDEventRef (*IOHIDEventCreateKeyboardEvent)(CFAllocatorRef, uint64_t, uint32_t, uint32_t, Boolean, uint32_t);
 
 // --- payload -----------------------------------------------------------
 // [u24 aux][u8 type | 0x80 on the container's last entry]; keys are
@@ -95,29 +106,49 @@ static NSData *orientationPayload(const char *value) {
 
 int main(int argc, char **argv) {
   @autoreleasepool {
-    if (argc < 2) { fprintf(stderr, "usage: HingeControl angle <deg> | sweep <from> <to> <ms> | orientation <portrait|landscapeLeft|landscapeRight|portraitUpsideDown>\n"); return 2; }
+    if (argc < 2) { fprintf(stderr, "usage: HingeControl angle <deg> | sweep <from> <to> <ms> | orientation <portrait|landscapeLeft|landscapeRight|portraitUpsideDown> | button <page> <usage> <ms>\n"); return 2; }
     dlopen("/System/Library/PrivateFrameworks/HID.framework/HID", RTLD_NOW);
     void *iokit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
     IOHIDEventCreateVendorDefinedEvent = dlsym(iokit, "IOHIDEventCreateVendorDefinedEvent");
-    if (!IOHIDEventCreateVendorDefinedEvent) { fprintf(stderr, "no IOHIDEventCreateVendorDefinedEvent\n"); return 1; }
+    IOHIDEventCreateKeyboardEvent = dlsym(iokit, "IOHIDEventCreateKeyboardEvent");
+    if (!IOHIDEventCreateVendorDefinedEvent || !IOHIDEventCreateKeyboardEvent) { fprintf(stderr, "no IOHIDEventCreate*Event\n"); return 1; }
     Class S = NSClassFromString(@"HIDVirtualEventService");
-    id service = [[S alloc] init];
-    ServiceDelegate *delegate = [ServiceDelegate new];
-    delegate.properties = @{
-      @"PrimaryUsagePage": @0xFF61, @"PrimaryUsage": @0x5B,
-      @"DeviceUsagePairs": @[@{@"DeviceUsagePage": @0xFF61, @"DeviceUsage": @0x5B}],
-      @"Transport": @"CoreDevice", @"Product": @"baguette HingeControl",
-      @"VendorID": @0, @"ProductID": @0, @"VersionNumber": @0, @"ReportInterval": @8000,
-    };
-    ((void (*)(id, SEL, id))objc_msgSend)(service, sel_registerName("setDelegate:"), delegate);
     dispatch_queue_t q = dispatch_queue_create("HingeControl", DISPATCH_QUEUE_SERIAL);
-    ((void (*)(id, SEL, id))objc_msgSend)(service, sel_registerName("setDispatchQueue:"), q);
-    ((void (*)(id, SEL))objc_msgSend)(service, sel_registerName("activate"));
-    uint64_t sid = ((uint64_t (*)(id, SEL))objc_msgSend)(service, sel_registerName("serviceID"));
-    if (!sid) { fprintf(stderr, "HID service did not activate\n"); return 1; }
-    usleep(300 * 1000);   // let the event system enumerate it
+    // A virtual service of the given usage, activated; nil if it did not.
+    id (^serviceOf)(unsigned, unsigned, NSString *, BOOL) = ^id(unsigned page, unsigned usage, NSString *product, BOOL builtIn) {
+      id service = [[S alloc] init];
+      ServiceDelegate *delegate = [ServiceDelegate new];
+      NSMutableDictionary *props = [@{
+        @"PrimaryUsagePage": @(page), @"PrimaryUsage": @(usage),
+        @"DeviceUsagePairs": @[@{@"DeviceUsagePage": @(page), @"DeviceUsage": @(usage)}],
+        @"Transport": @"CoreDevice", @"Product": product,
+        @"VendorID": @0, @"ProductID": @0, @"VersionNumber": @0, @"ReportInterval": @8000,
+      } mutableCopy];
+      if (builtIn) props[@"Built-In"] = @YES;
+      delegate.properties = props;
+      objc_setAssociatedObject(service, "delegate", delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+      ((void (*)(id, SEL, id))objc_msgSend)(service, sel_registerName("setDelegate:"), delegate);
+      ((void (*)(id, SEL, id))objc_msgSend)(service, sel_registerName("setDispatchQueue:"), q);
+      ((void (*)(id, SEL))objc_msgSend)(service, sel_registerName("activate"));
+      uint64_t sid = ((uint64_t (*)(id, SEL))objc_msgSend)(service, sel_registerName("serviceID"));
+      return sid ? service : nil;
+    };
+    id service = serviceOf(0xFF61, 0x5B, @"baguette HingeControl", NO);
+    id buttons = serviceOf(0x0B, 0x01, @"baguette HingeControl buttons", YES);
+    if (!service || !buttons) { fprintf(stderr, "HID service did not activate\n"); return 1; }
+    usleep(300 * 1000);   // let the event system enumerate them
 
     BOOL (*dispatch)(id, SEL, id) = (BOOL (*)(id, SEL, id))objc_msgSend;
+    // One key, down then up, as Device Hub's buttons press it.
+    void (^press)(unsigned, unsigned, unsigned) = ^(unsigned page, unsigned usage, unsigned ms) {
+      IOHIDEventRef down = IOHIDEventCreateKeyboardEvent(kCFAllocatorDefault, mach_absolute_time(), page, usage, true, 0);
+      if (!dispatch(buttons, sel_registerName("dispatchEvent:"), (__bridge id)down)) fprintf(stderr, "dispatch failed\n");
+      CFRelease(down);
+      usleep(ms * 1000);
+      IOHIDEventRef up = IOHIDEventCreateKeyboardEvent(kCFAllocatorDefault, mach_absolute_time(), page, usage, false, 0);
+      if (!dispatch(buttons, sel_registerName("dispatchEvent:"), (__bridge id)up)) fprintf(stderr, "dispatch failed\n");
+      CFRelease(up);
+    };
     void (^send)(NSData *) = ^(NSData *payload) {
       IOHIDEventRef ev = IOHIDEventCreateVendorDefinedEvent(kCFAllocatorDefault, mach_absolute_time(), 0xFF61, 0x5B, 0,
         (uint8_t *)payload.bytes, payload.length, 0);
@@ -125,7 +156,7 @@ int main(int argc, char **argv) {
       if (!ok) fprintf(stderr, "dispatch failed\n");
       CFRelease(ev);
     };
-    // One command: `angle D`, `sweep F T MS` or `orientation NAME`.
+    // One command: `angle D`, `sweep F T MS`, `orientation NAME` or `button P U MS`.
     // Returns NO for a line it does not understand.
     BOOL (^perform)(NSArray<NSString *> *) = ^BOOL(NSArray<NSString *> *words) {
       NSString *verb = words.firstObject ?: @"";
@@ -141,6 +172,9 @@ int main(int argc, char **argv) {
         }
       } else if ([verb isEqualToString:@"orientation"] && words.count >= 2) {
         send(orientationPayload(words[1].UTF8String));
+      } else if ([verb isEqualToString:@"button"] && words.count >= 4) {
+        press((unsigned)strtoul(words[1].UTF8String, NULL, 0), (unsigned)strtoul(words[2].UTF8String, NULL, 0),
+              (unsigned)strtoul(words[3].UTF8String, NULL, 0));
       } else {
         return NO;
       }
@@ -163,6 +197,7 @@ int main(int argc, char **argv) {
     }
     usleep(300 * 1000);
     ((void (*)(id, SEL))objc_msgSend)(service, sel_registerName("cancel"));
+    ((void (*)(id, SEL))objc_msgSend)(buttons, sel_registerName("cancel"));
     usleep(100 * 1000);
   }
   return 0;

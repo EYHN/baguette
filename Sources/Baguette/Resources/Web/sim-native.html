@@ -1589,22 +1589,23 @@
     cursor: crosshair;
   }
   /* The model's hardware buttons, placed by the server over the stage;
-     shown while the pointer is on the stage, as Device Hub shows them. */
+     shown while the pointer is on the stage, as Device Hub shows them:
+     a bare grey glyph beside the device, blue under the pointer. */
   #simNativeView .r3d-hw-buttons { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
   #simNativeView .r3d-hw-button {
     position: absolute; transform: translate(-50%, -50%);
-    min-width: 28px; height: 28px; padding: 0 8px; border-radius: 99px;
-    border: 1px solid rgba(15, 23, 42, 0.14); background: rgba(255, 255, 255, 0.92);
-    color: #1e293b; font: 600 12px/1 -apple-system, Inter, sans-serif;
-    cursor: pointer; pointer-events: auto; opacity: 0; transition: opacity 160ms ease;
-    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+    width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px;
+    background: transparent; color: #8e8e93;
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; pointer-events: auto; opacity: 0; transition: opacity 160ms ease, color 120ms ease;
   }
   #simNativeView #native3DStage:hover .r3d-hw-button { opacity: 1; }
-  #simNativeView .r3d-hw-button:active { background: #e2e8f0; }
-  /* Device Hub's pose picker, under the book. */
+  #simNativeView .r3d-hw-button:hover { color: #2f7cf6; }
+  #simNativeView .r3d-hw-button:active { color: #1d5fd0; transform: translate(-50%, -50%) scale(0.92); }
+  /* Device Hub's pose bar, under the book: three poses and the hinge slider. */
   #simNativeView .r3d-pose-picker {
     position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
-    display: flex; gap: 4px; padding: 4px; border-radius: 99px; z-index: 6;
+    display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 99px; z-index: 6;
     background: rgba(255, 255, 255, 0.94); border: 1px solid rgba(15, 23, 42, 0.12);
     box-shadow: 0 1px 6px rgba(15, 23, 42, 0.12);
   }
@@ -1615,6 +1616,18 @@
   }
   #simNativeView .r3d-pose-picker button:hover { background: rgba(15, 23, 42, 0.06); }
   #simNativeView .r3d-pose-picker button.active { background: #dbeafe; color: #2563eb; }
+  #simNativeView .r3d-pose-picker input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 120px; height: 26px; margin: 0 6px 0 4px;
+    padding-left: 10px; border-left: 1px solid rgba(15, 23, 42, 0.12); background: transparent; cursor: pointer;
+  }
+  #simNativeView .r3d-pose-picker input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px; background: rgba(15, 23, 42, 0.14);
+  }
+  #simNativeView .r3d-pose-picker input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%;
+    background: #fff; border: 1px solid rgba(15, 23, 42, 0.18); box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+  }
+  #simNativeView .r3d-pose-picker input[type="range"]:active::-webkit-slider-thumb { border-color: #2563eb; }
   /* A booted foldable never shows the flat chrome: its view is the book. */
   #simNativeView #nativeDeviceFrame[data-foldable] { display: none; }
   /* Fixed 3D (a foldable's default view): straight on, no tools. */
