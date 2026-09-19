@@ -33,6 +33,19 @@ struct FoldableModelDefinitionTests {
         }
     }
 
+    @Test func `the model's hardware buttons are named by the joints that carry them`() throws {
+        let model = try DeviceModelDefinition.parsing(json: Data(Self.duoJSON.utf8))
+
+        #expect(model.scene.buttons == [
+            DeviceModelButton(id: "power", joint: "oknVLIOxyFKJJzk"),
+            DeviceModelButton(id: "volume-up", joint: "xsdEUgktlZKTjeM"),
+        ])
+        let nameless = Self.duoJSON.replacingOccurrences(of: #""id": "power""#, with: #""id": """#)
+        #expect(throws: DeviceModelError.emptyField("scene.buttons")) {
+            try DeviceModelDefinition.parsing(json: Data(nameless.utf8))
+        }
+    }
+
     @Test func `a flat phone has no fold and no rest rotation`() throws {
         let model = try DeviceModelDefinition.parsing(json: DeviceModelDefinitionTests.macBook)
 
@@ -80,6 +93,10 @@ struct FoldableModelDefinitionTests {
         "usesScreenOverlay": false,
         "textureRotation": 90,
         "restRotation": {"x": 90, "y": 0, "z": 0},
+        "buttons": [
+          {"id": "power", "joint": "oknVLIOxyFKJJzk"},
+          {"id": "volume-up", "joint": "xsdEUgktlZKTjeM"}
+        ],
         "fold": {
           "clip": "l_over_r",
           "shutTime": 5.0,
