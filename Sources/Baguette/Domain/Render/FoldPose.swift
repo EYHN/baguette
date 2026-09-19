@@ -22,6 +22,26 @@ struct FoldPose: Equatable, Sendable {
             yawDegrees: -(foldDegrees / 2) * share
         )
     }
+
+    /// The shift that keeps the book in the middle as it folds, as
+    /// Device Hub keeps the device centred in its window: the bent
+    /// screen's extent — the left half raised by the clip and the whole
+    /// turned back — brought back so its middle sits at the origin.
+    /// `inner` is the unfolded screen in the rest frame, the hinge the y
+    /// axis through x = 0. Only the sideways shift matters; depth and
+    /// height stay the model's.
+    static func centring(inner: ScreenLocalCorners, hingeDegrees: Double, fold: DeviceModelFold) -> Vector3 {
+        let pose = at(degrees: hingeDegrees, fold: fold)
+        let raise = 180 - max(0, min(180, hingeDegrees))
+        let seamTop = Vector3(x: 0, y: inner.topLeft.y, z: inner.topLeft.z)
+        let seamBottom = Vector3(x: 0, y: inner.bottomLeft.y, z: inner.bottomLeft.z)
+        let left = [inner.topLeft, inner.bottomLeft].map { ScreenQuadProjection.rotateY($0, degrees: raise) }
+        let points = (left + [seamTop, seamBottom, inner.topRight, inner.bottomRight])
+            .map { ScreenQuadProjection.rotateY($0, degrees: pose.yawDegrees) }
+        let xs = points.map(\.x)
+        let middle = ((xs.min() ?? 0) + (xs.max() ?? 0)) / 2
+        return Vector3(x: -middle, y: 0, z: 0)
+    }
 }
 
 /// How far a foldable's model turns about the camera axis so that it

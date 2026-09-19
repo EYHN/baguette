@@ -111,6 +111,26 @@ struct FoldedScreenProjectionTests {
         #expect(near(marks[1].control, u: 0.55, v: 0.425))    // y 1 → 1.5
     }
 
+    @Test func `with the centring shift the shut cover sits in the middle of the frame`() throws {
+        let shift = FoldPose.centring(inner: inner, hingeDegrees: 0, fold: fold)
+        let p = FoldedScreenProjection.pieces(
+            inner: inner, cover: cover, litPanel: .primary, orientation: .portrait,
+            hingeDegrees: 0, fold: fold, rotation: .zero, offset: shift,
+            distance: camera.distance, fieldOfViewDegrees: camera.fov, aspect: camera.aspect
+        )
+        let c = try #require(p.first)
+        // Cover x 0…2 shifted by −1 → −1…1 → u 0.45…0.55.
+        #expect(near(c.quad.topLeft, u: 0.45, v: 0.45, tolerance: 0.002))
+        #expect(near(c.quad.topRight, u: 0.55, v: 0.45, tolerance: 0.002))
+        let marks = FoldedScreenProjection.buttons(
+            [ScreenButtonAnchor(id: "power", at: Vector3(x: 2, y: 0.5, z: 0))],
+            body: Vector3(x: 4, y: 2, z: 0.1), margin: 0.5,
+            hingeDegrees: 0, fold: fold, rotation: .zero, offset: shift,
+            distance: camera.distance, fieldOfViewDegrees: camera.fov, aspect: camera.aspect
+        )
+        #expect(near(marks[0].at, u: 0.55, v: 0.475))
+    }
+
     func near(_ p: NormalizedPoint, u: Double, v: Double, tolerance: Double = 1e-6) -> Bool {
         abs(p.u - u) < tolerance && abs(p.v - v) < tolerance
     }

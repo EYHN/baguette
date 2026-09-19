@@ -124,6 +124,9 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             self.rest.orientation = simd_quatf(
                 angle: Self.radians(pose.yawDegrees), axis: [0, 1, 0]
             ) * self.restOrientation
+            // Keep the book in the middle as it folds, as Device Hub does.
+            let shift = self.centring(at: hingeDegrees)
+            self.rest.position = SIMD3<Float>(Float(shift.x), Float(shift.y), Float(shift.z))
             self.hingeDegrees = hingeDegrees
             self.wrapper.orientation = Self.orientation(self.effectiveRotation)
             self.screenPieces = self.projectedScreenPieces()
@@ -159,6 +162,14 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     }
 
     @MainActor
+    private func centring(at degrees: Double) -> Vector3 {
+        guard let fold = plan.model.definition.scene.fold, let corners = screenLocalCorners else {
+            return Vector3(x: 0, y: 0, z: 0)
+        }
+        return FoldPose.centring(inner: corners, hingeDegrees: degrees, fold: fold)
+    }
+
+    @MainActor
     private func projectedScreenButtons() -> [ScreenButtonMark]? {
         guard let fold = plan.model.definition.scene.fold, !buttonAnchors.isEmpty else { return nil }
         return FoldedScreenProjection.buttons(
@@ -168,6 +179,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             hingeDegrees: hingeDegrees,
             fold: fold,
             rotation: effectiveRotation,
+            offset: centring(at: hingeDegrees),
             distance: cameraFraming.distance(at: view.zoom),
             fieldOfViewDegrees: cameraFraming.fieldOfViewDegrees,
             aspect: Double(plan.outputSize.width) / Double(plan.outputSize.height)
@@ -193,6 +205,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             hingeDegrees: hingeDegrees,
             fold: fold,
             rotation: effectiveRotation,
+            offset: centring(at: hingeDegrees),
             distance: cameraFraming.distance(at: view.zoom),
             fieldOfViewDegrees: cameraFraming.fieldOfViewDegrees,
             aspect: Double(plan.outputSize.width) / Double(plan.outputSize.height)

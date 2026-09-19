@@ -77,6 +77,33 @@ any other, so the page, `litPanel` and the chrome all follow.
 route (`HingeMotor.turn(to:)`); the page's rotate button still sends
 the Purple orientation event, which the guest honours or not per app.
 
+## Packaging
+
+`HingeControl` follows the injected dylibs exactly — `Injected/
+HingeControl/{build.sh,Sources/HingeControl.m}`, built fat by
+`Injected/build.sh` (host-arch-only under `BAGUETTE_INJECTED_ARCHS`),
+staged as `Sources/Baguette/Resources/HingeControl/HingeControl`,
+`.copy`'d by `Package.swift`, resolved and installed by
+`InjectedDylibInstaller` (`InjectedDylib.hingeControl`, kind
+`.executable`, env override `BAGUETTE_HINGECONTROL_TOOL`) into the
+content-hashed build directory with `0755`. The one difference is the
+link: an executable, so no `-dynamiclib` / `-install_name`.
+
+The homebrew-core formula rebuilds every injected product from source
+for the host arch (`brew audit` rejects the committed universal
+binaries), mirroring each `build.sh`; it needs one more entry for this
+one:
+
+```ruby
+# Executable spawned in the guest, not a dylib: same sources layout, plain link.
+tool = "Sources/Baguette/Resources/HingeControl/HingeControl"
+rm tool
+system "xcrun", "clang", "-arch", arch, "-isysroot", sdk,
+       "-target", "#{arch}-apple-ios17.0-simulator", "-fobjc-arc",
+       "-framework", "Foundation", "-Wl,-adhoc_codesign",
+       "-o", tool, *Dir["Injected/HingeControl/Sources/*.m"]
+```
+
 ## Known limits
 
 - Device Hub and baguette both feed the same hinge; whoever sent last

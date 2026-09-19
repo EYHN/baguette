@@ -26,7 +26,10 @@ For releases prior to this changelog, see the
   non-dylib under `Injected/`) that reproduces the HID pose events
   Device Hub's `dtuhidd` dispatches. `docs/features/hinge.md` records
   the route. `Subprocess` gains `runInteractive` / `write` for a child
-  served commands on stdin. Model definitions
+  served commands on stdin. The book stays centred in the frame as it
+  folds (`FoldPose.centring`), as Device Hub keeps it. Packaging: the
+  homebrew formula needs one plain-link entry for the executable
+  (`hinge.md` § Packaging). Model definitions
   gain `asset.xcodeResource`, `scene.restRotation`,
   `scene.textureRotation`, `scene.fold` and `scene.buttons`; the 3D
   socket's `screen_quad` gains `pieces`, `buttons` and `litPanel`, and

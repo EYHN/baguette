@@ -70,3 +70,41 @@ struct InterfaceRollTests {
         #expect(InterfaceRoll.degrees(.landscapeRight, litPanel: .primary) == 90)
     }
 }
+
+// As the book shuts, its left half lands on the right and the shut book
+// sits to one side of where the flat one was. Device Hub keeps the
+// device in the middle of its window through the whole fold, so the
+// pose carries the shift that recentres it: the bent screen's extent
+// after the clip's raise and the centring turn, brought back to zero.
+@Suite("FoldPose centring")
+struct FoldPoseCentringTests {
+    let fold = DeviceModelFold(
+        clip: "l_over_r", shutTime: 5.0,
+        coverMaterial: "cover", coverTextureSize: RenderDimensions(width: 1, height: 1),
+        openPoseDegrees: 130
+    )
+    let inner = ScreenLocalCorners(
+        topLeft: Vector3(x: -2, y: 1, z: 0), topRight: Vector3(x: 2, y: 1, z: 0),
+        bottomRight: Vector3(x: 2, y: -1, z: 0), bottomLeft: Vector3(x: -2, y: -1, z: 0)
+    )
+
+    @Test func `flat and at the open pose the book is where it lies`() {
+        #expect(FoldPose.centring(inner: inner, hingeDegrees: 180, fold: fold).x == 0)
+        let open = FoldPose.centring(inner: inner, hingeDegrees: 130, fold: fold)
+        #expect(abs(open.x) < 1e-9)
+    }
+
+    @Test func `shut, the book that folded onto its right half is brought back to the middle`() {
+        // The left half turned 180° lies over the right (x 0…2): the
+        // book's extent is 0…2, its middle 1, the shift −1.
+        let shut = FoldPose.centring(inner: inner, hingeDegrees: 0, fold: fold)
+        #expect(abs(shut.x - (-1)) < 1e-9)
+        #expect(shut.y == 0)
+    }
+
+    @Test func `half way, the shift follows the bent extent`() {
+        // 90°: left half up by 90° less the turn (share 90/130 of 45°).
+        let mid = FoldPose.centring(inner: inner, hingeDegrees: 90, fold: fold)
+        #expect(mid.x < 0 && mid.x > -1)
+    }
+}

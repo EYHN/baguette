@@ -48,6 +48,7 @@ enum FoldedScreenProjection {
         hingeDegrees: Double,
         fold: DeviceModelFold,
         rotation: DeviceRotation,
+        offset: Vector3 = Vector3(x: 0, y: 0, z: 0),
         distance: Double,
         fieldOfViewDegrees: Double,
         aspect: Double
@@ -59,8 +60,9 @@ enum FoldedScreenProjection {
         }
         let project = { (p: Vector3) -> NormalizedPoint in
             let turned = ScreenQuadProjection.rotateY(p, degrees: pose.yawDegrees)
+            let placed = Vector3(x: turned.x + offset.x, y: turned.y + offset.y, z: turned.z + offset.z)
             return ScreenQuadProjection.projectRotated(
-                ScreenQuadProjection.rotate(turned, by: rotation),
+                ScreenQuadProjection.rotate(placed, by: rotation),
                 distance: distance, fieldOfViewDegrees: fieldOfViewDegrees, aspect: aspect
             )
         }
@@ -112,6 +114,7 @@ enum FoldedScreenProjection {
         hingeDegrees: Double,
         fold: DeviceModelFold,
         rotation: DeviceRotation,
+        offset: Vector3 = Vector3(x: 0, y: 0, z: 0),
         distance: Double,
         fieldOfViewDegrees: Double,
         aspect: Double
@@ -122,6 +125,7 @@ enum FoldedScreenProjection {
             var p = point
             if anchor.x < 0 { p = ScreenQuadProjection.rotateY(p, degrees: raise) }
             p = ScreenQuadProjection.rotateY(p, degrees: pose.yawDegrees)
+            p = Vector3(x: p.x + offset.x, y: p.y + offset.y, z: p.z + offset.z)
             return ScreenQuadProjection.projectRotated(
                 ScreenQuadProjection.rotate(p, by: rotation),
                 distance: distance, fieldOfViewDegrees: fieldOfViewDegrees, aspect: aspect
