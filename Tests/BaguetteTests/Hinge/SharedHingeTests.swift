@@ -95,6 +95,63 @@ struct SharedHingeTests {
         wb.cancel()
     }
 
+    /// A pose change ends with the page reloading, which closes the
+    /// socket — and so the watch — a moment before the new page's
+    /// definition, mask and stream requests each ask the angle. Those
+    /// must agree, and the sweep's last sample is the truth for a
+    /// while: the hinge does not move without Device Hub, and the new
+    /// page's socket restarts the watch within seconds.
+    @Test func `the last sample outlives the watch for a grace period`() {
+        let inner = Inner()
+        var now = Date(timeIntervalSince1970: 1000)
+        let shared = SharedHinge(inner: inner.hinge, now: { now })
+        let w = shared.watch { _ in }
+        inner.onAngle?(HingeAngle(degrees: 4.8))
+        w.cancel()
+        now = now.addingTimeInterval(3)
+        #expect(shared.angle() == HingeAngle(degrees: 4.8))
+        verify(inner.hinge).angle().called(0)
+    }
+
+    @Test func `after the grace period the angle is read again`() {
+        let inner = Inner()
+        given(inner.hinge).angle().willReturn(HingeAngle(degrees: 130))
+        var now = Date(timeIntervalSince1970: 1000)
+        let shared = SharedHinge(inner: inner.hinge, now: { now })
+        let w = shared.watch { _ in }
+        inner.onAngle?(HingeAngle(degrees: 4.8))
+        w.cancel()
+        now = now.addingTimeInterval(SharedHinge.gracePeriod + 1)
+        #expect(shared.angle() == HingeAngle(degrees: 130))
+    }
+
+    /// A page reload asks the angle from several requests at once —
+    /// `/hinge`, the definition, the stream bind — before any socket
+    /// has restarted the watch. Each spawning its own monitor is what
+    /// produced disagreeing panels (a second concurrent devicectl
+    /// monitor answers 0° for a device sitting at 130°). One read
+    /// serves the burst: the first spawns, the rest share its sample.
+    @Test func `a one-shot read is remembered for the grace period`() {
+        let inner = Inner()
+        given(inner.hinge).angle().willReturn(HingeAngle(degrees: 130))
+        var now = Date(timeIntervalSince1970: 1000)
+        let shared = SharedHinge(inner: inner.hinge, now: { now })
+        #expect(shared.angle() == HingeAngle(degrees: 130))
+        now = now.addingTimeInterval(2)
+        #expect(shared.angle() == HingeAngle(degrees: 130))
+        verify(inner.hinge).angle().called(1)
+    }
+
+    /// A failed read is not remembered — the next caller tries again.
+    @Test func `a read that returns nothing is not cached`() {
+        let inner = Inner()
+        given(inner.hinge).angle().willReturn(nil)
+        let shared = SharedHinge(inner: inner.hinge)
+        #expect(shared.angle() == nil)
+        #expect(shared.angle() == nil)
+        verify(inner.hinge).angle().called(2)
+    }
+
     /// The same device always gets the same shared hinge, whoever asks.
     @Test func `the registry hands out one shared hinge per device`() {
         let inner = Inner()

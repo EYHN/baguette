@@ -40,6 +40,23 @@ struct BezelRoutesTests {
         #expect(bytes == Data("BARE-PNG".utf8))
     }
 
+    // MARK: - screen mask
+
+    /// The lit panel's framebuffer mask, as the page's CSS mask.
+    @Test func `screenMaskImage returns the chrome's rasterized mask`() throws {
+        let (sim, chromes) = Self.fixture(screenMask: ChromeImage(
+            data: Data("MASK-PNG".utf8), size: Size(width: 466, height: 678)))
+        let bytes = Server.screenMaskImage(
+            udid: "UDID-1", simulators: Self.simulators(with: sim), chromes: chromes)
+        #expect(bytes == Data("MASK-PNG".utf8))
+    }
+
+    @Test func `screenMaskImage is nil when the chrome carries no mask`() throws {
+        let (sim, chromes) = Self.fixture()
+        #expect(Server.screenMaskImage(
+            udid: "UDID-1", simulators: Self.simulators(with: sim), chromes: chromes) == nil)
+    }
+
     @Test func `applyOrientation routes a valid value through the simulator's orientation surface`() {
         let host = MockSimulators()
         let sim = MockSimulator()
@@ -235,7 +252,7 @@ private extension BezelRoutesTests {
     /// One-shot fixture: a booted simulator whose chrome carries one
     /// button (`power`) plus distinct merged + bare composites
     /// so byte equality alone proves which path was taken.
-    static func fixture() -> (any Simulator, any Chromes) {
+    static func fixture(screenMask: ChromeImage? = nil) -> (any Simulator, any Chromes) {
         let chrome = DeviceChrome(
             identifier: "phone11",
             screenInsets: Insets(top: 0, left: 0, bottom: 0, right: 0),
@@ -265,7 +282,8 @@ private extension BezelRoutesTests {
                     data: Data("POWER-PNG".utf8),
                     size: Size(width: 10, height: 30)
                 ),
-            ]
+            ],
+            screenMask: screenMask
         )
 
         let chromes = MockChromes()

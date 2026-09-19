@@ -20,11 +20,14 @@ function load() {
 // from these samples, and replays a recorded sweep on the panel it
 // arrives at after the swap.
 
-test('the right leaf turns about the seam: flat at 180°, shut at 0°', () => {
+test('both leaves turn about the seam by half the fold: flat at 180°, edge-on at 0°', () => {
   const { HingeSweep } = load();
-  assert.equal(HingeSweep.leafTransform(180), 'rotateY(0deg)');
-  assert.equal(HingeSweep.leafTransform(130), 'rotateY(-50deg)');
-  assert.equal(HingeSweep.leafTransform(0), 'rotateY(-180deg)');
+  // Device Hub's bend is centred — the spine stays put and both
+  // pages rise toward the viewer. Positive rotateY brings the left
+  // edge forward, negative the right, so the two get opposite halves.
+  assert.deepEqual(HingeSweep.leafTransforms(180), { left: 'rotateY(0deg)', right: 'rotateY(0deg)' });
+  assert.deepEqual(HingeSweep.leafTransforms(130), { left: 'rotateY(25deg)', right: 'rotateY(-25deg)' });
+  assert.deepEqual(HingeSweep.leafTransforms(0), { left: 'rotateY(90deg)', right: 'rotateY(-90deg)' });
 });
 
 test('a sweep records samples with their times and knows its direction', () => {

@@ -27,4 +27,9 @@ protocol ChromeStore: Sendable {
     /// is the basename from `chrome.json` (e.g. `"PhoneComposite"`,
     /// `"Mute BTN"`); the store appends `.pdf`.
     func chromeAssetPDF(chromeIdentifier: String, imageName: String) throws -> Data
+
+    /// Raw PDF bytes of a framebuffer mask, by the identifier a panel
+    /// names in `capabilities.plist` (`framebufferMaskIdentifier`).
+    /// Lives beside the chrome bundles under DeviceKit.
+    func framebufferMaskPDF(identifier: String) throws -> Data
 }

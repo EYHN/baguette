@@ -6,13 +6,25 @@ import Foundation
 struct FileSystemChromeStore: ChromeStore {
     let deviceTypesRoot: String
     let chromeRoot: String
+    let masksRoot: String
 
     init(
         deviceTypesRoot: String = "/Library/Developer/CoreSimulator/Profiles/DeviceTypes",
-        chromeRoot: String = "/Library/Developer/DeviceKit/Chrome"
+        chromeRoot: String = "/Library/Developer/DeviceKit/Chrome",
+        masksRoot: String = "/Library/Developer/DeviceKit/FramebufferMasks"
     ) {
         self.deviceTypesRoot = deviceTypesRoot
         self.chromeRoot = chromeRoot
+        self.masksRoot = masksRoot
+    }
+
+    func framebufferMaskPDF(identifier: String) throws -> Data {
+        // The identifier is a UUID from a plist Apple wrote; refuse
+        // anything that could walk out of the masks directory.
+        guard !identifier.contains("/"), !identifier.contains("..") else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return try Data(contentsOf: URL(fileURLWithPath: "\(masksRoot)/\(identifier).pdf"))
     }
 
     func profilePlistData(deviceName: String) throws -> Data {

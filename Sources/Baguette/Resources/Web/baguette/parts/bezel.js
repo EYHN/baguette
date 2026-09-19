@@ -67,10 +67,43 @@
       screenArea.style.top    = (r.y      / vp.height * 100) + '%';
       screenArea.style.width  = (r.width  / vp.width  * 100) + '%';
       screenArea.style.height = (r.height / vp.height * 100) + '%';
+      // The screen's shape: the simulator's own framebuffer mask when
+      // the definition names one — iPhone Duo's cover is near-square
+      // on the hinge side and round on the outer edge, which one
+      // radius cannot say — otherwise `clipRadius` on every corner.
       const cr = this.def.clipRadius || 0;
       const hPct = (cr / r.width)  * 100;
       const vPct = (cr / r.height) * 100;
       screenArea.style.borderRadius = `${hPct}% / ${vPct}%`;
+      if (this.def.maskImage) {
+        const mask = `url("${this.def.maskImage}") center / 100% 100% no-repeat`;
+        screenArea.style.webkitMaskImage = `url("${this.def.maskImage}")`;
+        screenArea.style.webkitMaskSize = '100% 100%';
+        screenArea.style.webkitMaskRepeat = 'no-repeat';
+        screenArea.style.maskImage = `url("${this.def.maskImage}")`;
+        screenArea.style.maskSize = '100% 100%';
+        screenArea.style.maskRepeat = 'no-repeat';
+        screenArea.style.borderRadius = '0';
+        void mask;
+      }
+
+      // A foldable's unfolded panel is one framebuffer creased by the
+      // hinge across the middle of its long axis. Device Hub draws the
+      // seam; so does this — a hairline over the frame, no input.
+      if (this.def.crease) {
+        const crease = document.createElement('div');
+        const tall = r.height >= r.width;
+        crease.dataset.crease = '';
+        crease.style.cssText = [
+          'position:absolute', 'pointer-events:none', 'z-index:3',
+          tall ? 'left:0;right:0;top:50%;height:1px;transform:translateY(-50%)'
+               : 'top:0;bottom:0;left:50%;width:1px;transform:translateX(-50%)',
+          'background:rgba(0,0,0,0.28)',
+          tall ? 'box-shadow:0 0 6px 1px rgba(255,255,255,0.10)'
+               : 'box-shadow:0 0 6px 1px rgba(255,255,255,0.10)',
+        ].join(';');
+        screenArea.appendChild(crease);
+      }
 
       container.appendChild(wrapper);
 

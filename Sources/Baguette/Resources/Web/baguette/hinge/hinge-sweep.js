@@ -21,10 +21,17 @@
       this._lastAt = null;
     }
 
-    /** The right leaf's turn about the seam for a hinge angle. */
-    static leafTransform(degrees) {
-      const turn = Math.max(0, Math.min(180, 180 - degrees));
-      return `rotateY(${-Math.round(turn * 100) / 100}deg)`;
+    /**
+     * Each leaf's turn about the seam for a hinge angle. The bend is
+     * centred, as Device Hub draws it: the spine stays put and both
+     * pages take half the fold, rising toward the viewer. Positive
+     * rotateY brings an element's left edge forward, so the left leaf
+     * turns positive and the right negative.
+     */
+    static leafTransforms(degrees) {
+      const half = Math.max(0, Math.min(180, 180 - degrees)) / 2;
+      const deg = Math.round(half * 100) / 100;
+      return { left: `rotateY(${deg}deg)`, right: `rotateY(${-deg}deg)` };
     }
 
     push(degrees, atMs) {

@@ -60,6 +60,15 @@ struct SimulatorDefinition: Equatable, Sendable {
         /// caps to. The SDK clips its overlays to the same canvas so a
         /// cap drawn behind the body protrudes by the same nub.
         let buttonMargins: Insets
+        /// URL of the panel's framebuffer mask — the shape the simulator
+        /// clips this screen to — when the chrome carries one. The page
+        /// masks the live frame with it instead of rounding by
+        /// `clipRadius`, which cannot say "square on the hinge side".
+        let maskImage: String?
+        /// A foldable's unfolded panel: one framebuffer creased across
+        /// the middle of its long axis by the hinge. Drawn by the page;
+        /// the fold view splits there.
+        let crease: Bool
         /// Bezel image URLs. `rest` is the merged composite (default),
         /// `bare` is the device body with buttons stripped — the
         /// SDK fetches `bare` when buttons are rendered as separate
@@ -175,6 +184,8 @@ extension SimulatorDefinition {
                     "height": screen.rect.size.height,
                 ],
                 "clipRadius": screen.clipRadius,
+                "maskImage": screen.maskImage.map { $0 as Any } ?? NSNull(),
+                "crease": screen.crease,
                 "buttonMargins": [
                     "top":    screen.buttonMargins.top,
                     "left":   screen.buttonMargins.left,
@@ -228,10 +239,13 @@ extension SimulatorDefinition {
     /// appending the well-known suffixes. Keeping the prefix as an
     /// argument means the domain stays URL-agnostic — the server
     /// decides the route layout, the factory just composes strings.
+    /// `panel` is which of the device's panels the chrome describes;
+    /// a foldable's `.secondary` is the creased, unfolded one.
     static func compose(
         from simulator: any Simulator,
         chrome assets: DeviceChromeAssets,
-        urlPrefix: String
+        urlPrefix: String,
+        panel: IntegratedPanel = .primary
     ) -> SimulatorDefinition {
         compose(
             identity: Identity(
@@ -240,7 +254,8 @@ extension SimulatorDefinition {
                 model: simulator.deviceTypeName
             ),
             chrome: assets,
-            urlPrefix: urlPrefix
+            urlPrefix: urlPrefix,
+            panel: panel
         )
     }
 
@@ -250,7 +265,8 @@ extension SimulatorDefinition {
     static func compose(
         identity: Identity,
         chrome assets: DeviceChromeAssets,
-        urlPrefix: String
+        urlPrefix: String,
+        panel: IntegratedPanel = .primary
     ) -> SimulatorDefinition {
         let chrome = assets.chrome
         // The SDK always renders the bare bezel + button overlays, so
@@ -273,6 +289,8 @@ extension SimulatorDefinition {
                 rect:       screenRect,
                 clipRadius: chrome.innerCornerRadius,
                 buttonMargins: m,
+                maskImage: assets.screenMask == nil ? nil : "\(urlPrefix)/screen-mask.png",
+                crease: panel == .secondary,
                 bezelImage: BezelImage(
                     rest: "\(urlPrefix)/bezel.png",
                     bare: "\(urlPrefix)/bezel.png?buttons=false"

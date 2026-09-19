@@ -50,6 +50,38 @@ struct SimulatorDefinitionTests {
         #expect(margins == ["top": 10, "left": 10, "bottom": 10, "right": 10])
     }
 
+    /// The simulator clips each panel's framebuffer with a mask PDF —
+    /// on iPhone Duo's cover the hinge-side corners are nearly square
+    /// and the outer ones round, which one radius cannot describe. When
+    /// the chrome carries the mask, the page is pointed at it.
+    @Test func `screen carries a mask image url when the chrome has a mask`() throws {
+        let def = Self.composeFixture(screenMask: ChromeImage(
+            data: Data("MASK".utf8), size: Size(width: 466, height: 678)))
+        #expect(def.screen.maskImage == "/simulators/UDID-1/screen-mask.png")
+        let json = try #require(def.toJSON().data(using: .utf8))
+        let root = try #require(try JSONSerialization.jsonObject(with: json) as? [String: Any])
+        let screen = try #require(root["screen"] as? [String: Any])
+        #expect(screen["maskImage"] as? String == "/simulators/UDID-1/screen-mask.png")
+    }
+
+    @Test func `screen has no mask image when the chrome has none`() throws {
+        let def = Self.composeFixture()
+        #expect(def.screen.maskImage == nil)
+        let json = try #require(def.toJSON().data(using: .utf8))
+        let root = try #require(try JSONSerialization.jsonObject(with: json) as? [String: Any])
+        let screen = try #require(root["screen"] as? [String: Any])
+        #expect(screen["maskImage"] is NSNull)
+    }
+
+    /// A foldable's unfolded panel is one framebuffer with a crease
+    /// across the middle of its long axis — the hinge. The page draws
+    /// it, and the fold view splits there.
+    @Test func `an unfolded panel carries its crease`() {
+        #expect(Self.composeFixture(panel: .secondary).screen.crease == true)
+        #expect(Self.composeFixture(panel: .primary).screen.crease == false)
+        #expect(Self.composeFixture().screen.crease == false)
+    }
+
     @Test func `screen rect is in bare-bezel coordinates`() {
         let def = Self.composeFixtureWithMargins()
         // chrome insets are {top:20, left:10, bottom:20, right:10} on
@@ -216,7 +248,9 @@ struct SimulatorDefinitionTests {
 
     // MARK: - fixture
 
-    static func composeFixture() -> SimulatorDefinition {
+    static func composeFixture(
+        screenMask: ChromeImage? = nil, panel: IntegratedPanel = .primary
+    ) -> SimulatorDefinition {
         let sim = MockSimulator()
         given(sim).udid.willReturn("UDID-1")
         given(sim).name.willReturn("iPhone 17 Pro")
@@ -234,11 +268,12 @@ struct SimulatorDefinitionTests {
             composite: ChromeImage(
                 data: Data("MERGED".utf8),
                 size: Size(width: 400, height: 800)
-            )
+            ),
+            screenMask: screenMask
         )
 
         return SimulatorDefinition.compose(
-            from: sim, chrome: assets, urlPrefix: "/simulators/UDID-1"
+            from: sim, chrome: assets, urlPrefix: "/simulators/UDID-1", panel: panel
         )
     }
 

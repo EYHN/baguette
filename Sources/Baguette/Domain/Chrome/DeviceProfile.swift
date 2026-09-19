@@ -32,7 +32,24 @@ struct DeviceProfile: Equatable, Sendable {
     struct PanelProfile: Equatable, Sendable {
         let chromeIdentifier: String
         let screenSize: Size?
+        /// The framebuffer mask CoreSimulator clips this panel with —
+        /// `/Library/Developer/DeviceKit/FramebufferMasks/<id>.pdf`.
+        /// The shape the simulator itself uses: iPhone Duo's cover has
+        /// near-square corners on the hinge side and round ones on the
+        /// outer edge, which `chrome.json`'s single radius cannot say.
+        /// `nil` when the profile names none (Xcode ≤26).
+        let framebufferMaskIdentifier: String?
+
+        init(chromeIdentifier: String, screenSize: Size?, framebufferMaskIdentifier: String? = nil) {
+            self.chromeIdentifier = chromeIdentifier
+            self.screenSize = screenSize
+            self.framebufferMaskIdentifier = framebufferMaskIdentifier
+        }
     }
+
+    /// The primary panel's mask, from the `primary` (or only) integrated
+    /// display in `capabilities.plist`.
+    let framebufferMaskIdentifier: String?
 
     var panels: [IntegratedPanel] {
         secondaryPanel == nil ? [.primary] : [.primary, .secondary]
@@ -41,10 +58,24 @@ struct DeviceProfile: Equatable, Sendable {
     func panel(_ panel: IntegratedPanel) -> PanelProfile? {
         switch panel {
         case .primary:
-            return PanelProfile(chromeIdentifier: chromeIdentifier, screenSize: screenSize)
+            return PanelProfile(
+                chromeIdentifier: chromeIdentifier, screenSize: screenSize,
+                framebufferMaskIdentifier: framebufferMaskIdentifier)
         case .secondary:
             return secondaryPanel
         }
+    }
+
+    init(
+        chromeIdentifier: String,
+        screenSize: Size?,
+        secondaryPanel: PanelProfile? = nil,
+        framebufferMaskIdentifier: String? = nil
+    ) {
+        self.chromeIdentifier = chromeIdentifier
+        self.screenSize = screenSize
+        self.secondaryPanel = secondaryPanel
+        self.framebufferMaskIdentifier = framebufferMaskIdentifier
     }
 
     static func parsing(
@@ -77,9 +108,11 @@ struct DeviceProfile: Equatable, Sendable {
                 guard let id = panel["chromeIdentifier"] as? String else { return nil }
                 return PanelProfile(
                     chromeIdentifier: bareChromeIdentifier(id),
-                    screenSize: parseDisplaySize(panel)
+                    screenSize: parseDisplaySize(panel),
+                    framebufferMaskIdentifier: panel["framebufferMaskIdentifier"] as? String
                 )
-            }
+            },
+            framebufferMaskIdentifier: cover?["framebufferMaskIdentifier"] as? String
         )
     }
 

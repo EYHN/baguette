@@ -16,13 +16,23 @@ import Foundation
 /// the inner hinge owns the process.
 final class SharedHinge: Hinge, @unchecked Sendable {
     private let inner: any Hinge
+    private let now: () -> Date
     private let lock = NSLock()
     private var subscribers: [UUID: @Sendable (HingeAngle) -> Void] = [:]
     private var innerWatch: (any HingeWatch)?
-    private var last: HingeAngle?
+    private var last: (angle: HingeAngle, at: Date)?
 
-    init(inner: any Hinge) {
+    /// How long the last sample stays the answer after the watch
+    /// stops. A pose change ends with the page reloading — socket and
+    /// watch go down — and the new page's definition, mask and stream
+    /// requests all ask within the next second or two. They must agree,
+    /// and the sweep's final sample is the truth: the hinge does not
+    /// move without Device Hub, and the new socket restarts the watch.
+    static let gracePeriod: TimeInterval = 10
+
+    init(inner: any Hinge, now: @escaping () -> Date = { Date() }) {
         self.inner = inner
+        self.now = now
     }
 
     // MARK: - registry
@@ -42,11 +52,33 @@ final class SharedHinge: Hinge, @unchecked Sendable {
 
     // MARK: - Hinge
 
+    /// Serialises one-shot reads: a burst of callers with nothing
+    /// cached spawns one monitor, and the rest take its sample. Two
+    /// concurrent devicectl monitors on one device do not agree — the
+    /// second reported 0° for a device at 130° — which is how a reload
+    /// once bound the unfolded panel's stream under the cover's chrome.
+    private let readLock = NSLock()
+
     func angle() -> HingeAngle? {
+        if let cached = fresh() { return cached }
+        readLock.lock()
+        defer { readLock.unlock() }
+        if let cached = fresh() { return cached }
+        guard let read = inner.angle() else { return nil }
         lock.lock()
-        let cached = innerWatch != nil ? last : nil
+        last = (read, now())
         lock.unlock()
-        return cached ?? inner.angle()
+        return read
+    }
+
+    private func fresh() -> HingeAngle? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let cached = last else { return nil }
+        if innerWatch != nil || now().timeIntervalSince(cached.at) <= Self.gracePeriod {
+            return cached.angle
+        }
+        return nil
     }
 
     func watch(onAngle: @escaping @Sendable (HingeAngle) -> Void) -> any HingeWatch {
@@ -66,7 +98,7 @@ final class SharedHinge: Hinge, @unchecked Sendable {
 
     private func deliver(_ angle: HingeAngle) {
         lock.lock()
-        last = angle
+        last = (angle, now())
         let targets = Array(subscribers.values)
         lock.unlock()
         for target in targets { target(angle) }
@@ -76,10 +108,7 @@ final class SharedHinge: Hinge, @unchecked Sendable {
         lock.lock()
         subscribers[id] = nil
         let stop = subscribers.isEmpty ? innerWatch : nil
-        if stop != nil {
-            innerWatch = nil
-            last = nil
-        }
+        if stop != nil { innerWatch = nil }
         lock.unlock()
         stop?.cancel()
     }

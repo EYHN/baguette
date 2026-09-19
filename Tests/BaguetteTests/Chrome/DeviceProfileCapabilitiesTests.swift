@@ -82,12 +82,14 @@ struct DeviceProfileCapabilitiesTests {
             "displayType": "integrated", "deviceName": "primary",
             "displayName": "LCD",
             "chromeIdentifier": "com.apple.dt.devicekit.chrome.phone15",
+            "framebufferMaskIdentifier": "1C896A2B-F0D7-405C-8D0F-66E4B80AD044",
             "width": 1398, "height": 2034, "scale": 3,
         ]
         let unfolded: [String: Any] = [
             "displayType": "integrated", "deviceName": "primary-1",
             "displayName": "LCD-1",
             "chromeIdentifier": "com.apple.dt.devicekit.chrome.phone14",
+            "framebufferMaskIdentifier": "BF0DC480-5EE2-4EC1-B02B-C75E94759832",
             "width": 2007, "height": 2853, "scale": 3,
         ]
         let plist: [String: Any] = [
@@ -126,6 +128,19 @@ struct DeviceProfileCapabilitiesTests {
         #expect(cover.chromeIdentifier == "tablet5")   // the profile's own id wins for the primary
         #expect(cover.screenSize == Size(width: 466, height: 678))
         #expect(profile.panels == [.primary, .secondary])
+        // The shape CoreSimulator masks each framebuffer with: the
+        // cover's hinge-side corners are nearly square, the unfolded
+        // panel's four are even. `chrome.json`'s one radius cannot say
+        // that; the mask can.
+        #expect(unfolded.framebufferMaskIdentifier == "BF0DC480-5EE2-4EC1-B02B-C75E94759832")
+        #expect(cover.framebufferMaskIdentifier == "1C896A2B-F0D7-405C-8D0F-66E4B80AD044")
+    }
+
+    @Test func `a panel without a mask identifier has none`() throws {
+        let profile = try DeviceProfile.parsing(
+            plistData: modernProfile(), capabilitiesData: capabilities()
+        )
+        #expect(profile.panel(.primary)?.framebufferMaskIdentifier == nil)
     }
 
     @Test func `a single-panel device has no secondary panel`() throws {

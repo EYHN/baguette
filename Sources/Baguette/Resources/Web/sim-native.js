@@ -427,7 +427,10 @@
     if (hinge && hinge.foldable) {
       currentLitPanel = hinge.litPanel || 'primary';
       if (hinge.orientation && hinge.orientation !== 'portrait') applyOrientation(hinge.orientation);
-      unfoldIn();
+      if (!unfoldIn() && currentLitPanel === 'secondary' && typeof hinge.angleDegrees === 'number') {
+        // No sweep to replay — a fresh visit to a device already bent.
+        oncePainted(() => settleAt(hinge.angleDegrees));
+      }
     } else if (isBooted(meta.state)) {
       resetToPortrait();
     }
@@ -502,11 +505,34 @@
   let hingeLiveAt = 0;
 
   function fold() {
-    if (!foldView && window.Baguette && window.Baguette._FoldView) {
+    if (!foldView && window.Baguette && window.Baguette._FoldView && sim) {
       foldView = new window.Baguette._FoldView(
-        document.getElementById('nativeDeviceFrame'), () => rotationDegrees);
+        document.getElementById('nativeDeviceFrame'), () => rotationDegrees,
+        sim.def ? sim.def.screen : null, sim.screen);
     }
     return foldView;
+  }
+
+  // Device Hub's open pose is 130°: a bent book, not a flat slab. The
+  // fold view stays up at any angle short of flat and takes input
+  // through the leaves' projected quads, so the page looks and taps
+  // like the device Device Hub shows.
+  let settledAngle = null;
+  function settleAt(degrees) {
+    settledAngle = degrees;
+    if (currentLitPanel !== 'secondary') return;
+    const view = fold();
+    if (view) view.settle(degrees);
+  }
+
+  // Wait for the stream's first frame before showing a still of it.
+  function oncePainted(fn) {
+    const startedAt = Date.now();
+    const check = () => {
+      if ((session && session.frameCount > 0) || Date.now() - startedAt > 3000) fn();
+      else setTimeout(check, 50);
+    };
+    check();
   }
 
   function onHingeSample(degrees) {
@@ -528,7 +554,7 @@
     liveSweep = null;
     if (!sweep) return;
     if (sweep.length < 2 || sweep.litPanel === currentLitPanel) {
-      if (foldView) foldView.hide();
+      settleAt(sweep.to);
       return;
     }
     try {
@@ -546,25 +572,20 @@
     try {
       hand = JSON.parse(sessionStorage.getItem(FOLD_KEY) || 'null');
       sessionStorage.removeItem(FOLD_KEY);
-    } catch (e) { return; }
-    if (!hand || typeof hand !== 'object' || Date.now() - Number(hand.at) > 15000) return;
-    if (hand.to !== 'secondary' || !window.Baguette || !window.Baguette.HingeSweep) { rise(); return; }
+    } catch (e) { return false; }
+    if (!hand || typeof hand !== 'object' || Date.now() - Number(hand.at) > 15000) return false;
+    if (hand.to !== 'secondary' || !window.Baguette || !window.Baguette.HingeSweep) { rise(); return true; }
     const sweep = window.Baguette.HingeSweep.fromJSON(hand.sweep);
-    if (sweep.length < 2) { rise(); return; }
+    if (sweep.length < 2) { rise(); return true; }
     const view = fold();
-    if (!view) return;
+    if (!view) return false;
     // Open shut, so the first painted frame is not seen flat before the turn.
     view.update(sweep.from);
-    const startedAt = Date.now();
-    const whenPainted = () => {
-      if ((session && session.frameCount > 0) || Date.now() - startedAt > 3000) {
-        const ms = sweep.replay((a) => view.update(a));
-        setTimeout(() => view.hide(), ms + 120);
-      } else {
-        setTimeout(whenPainted, 50);
-      }
-    };
-    whenPainted();
+    oncePainted(() => {
+      const ms = sweep.replay((a) => view.update(a));
+      setTimeout(() => settleAt(sweep.to), ms + 120);
+    });
+    return true;
   }
 
   function rise() {

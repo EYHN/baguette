@@ -566,6 +566,26 @@ struct Server: Sendable {
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
             return Self.definitionJSON(udid: Self.udidParam(r), simulators: simulators, chromes: chromes)
         }
+        // The lit panel's framebuffer mask — the shape the simulator
+        // clips that screen to. 404 when the chrome names none; the page
+        // then rounds by `clipRadius` as it always has.
+        router.get("/simulators/:udid/screen-mask.png") { [simulators, chromes] r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            guard let bytes = Self.screenMaskImage(
+                udid: Self.udidParam(r), simulators: simulators, chromes: chromes
+            ) else {
+                return Response(
+                    status: .notFound,
+                    headers: [.contentType: "text/plain"],
+                    body: .init(byteBuffer: ByteBuffer(string: "no screen mask for \(Self.udidParam(r))"))
+                )
+            }
+            return Response(
+                status: .ok,
+                headers: [.contentType: "image/png", .cacheControl: "no-cache"],
+                body: .init(byteBuffer: ByteBuffer(data: bytes))
+            )
+        }
         router.get("/simulators/:udid/bezel.png") { [simulators, chromes] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
             // ?buttons=false → bare device body (no buttons baked in).
@@ -1770,14 +1790,21 @@ struct Server: Sendable {
         simulators: any Simulators,
         chromes: any Chromes
     ) -> String? {
-        guard !udid.isEmpty, let sim = simulators.find(udid: udid),
-              let assets = sim.chrome(in: chromes) else {
-            return nil
+        guard !udid.isEmpty, let sim = simulators.find(udid: udid) else { return nil }
+        // Resolve the panel once: it names the chrome and it says
+        // whether the screen is a foldable's creased, unfolded one.
+        let panel = sim.litPanel(in: chromes)
+        let assets: DeviceChromeAssets?
+        switch panel {
+        case .primary:   assets = chromes.assets(forDeviceName: sim.deviceTypeName)
+        case .secondary: assets = chromes.assets(forDeviceName: sim.deviceTypeName, panel: .secondary)
         }
+        guard let assets else { return nil }
         let def = SimulatorDefinition.compose(
             from: sim,
             chrome: assets,
-            urlPrefix: "/simulators/\(udid)"
+            urlPrefix: "/simulators/\(udid)",
+            panel: panel
         )
         return def.toJSON()
     }
@@ -2500,6 +2527,20 @@ struct Server: Sendable {
             return nil
         }
         return withButtons ? assets.composite.data : assets.bareComposite.data
+    }
+
+    /// Pure data producer for `screen-mask.png`: the lit panel's mask,
+    /// or `nil` when the chrome carries none.
+    static func screenMaskImage(
+        udid: String,
+        simulators: any Simulators,
+        chromes: any Chromes
+    ) -> Data? {
+        guard !udid.isEmpty, let sim = simulators.find(udid: udid),
+              let assets = sim.chrome(in: chromes) else {
+            return nil
+        }
+        return assets.screenMask?.data
     }
 
     private static func chromeButtonPNG(

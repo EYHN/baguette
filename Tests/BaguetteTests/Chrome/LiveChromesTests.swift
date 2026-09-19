@@ -18,6 +18,8 @@ struct LiveChromesTests {
         let store = MockChromeStore()
         given(store).capabilitiesPlistData(deviceName: .any)
             .willThrow(StubError.notFound)
+        given(store).framebufferMaskPDF(identifier: .any)
+            .willThrow(StubError.notFound)
         return store
     }
 
@@ -30,9 +32,11 @@ struct LiveChromesTests {
         let plist: [String: Any] = ["capabilities": ["displays": [
             ["displayType": "integrated", "deviceName": "primary",
              "chromeIdentifier": "com.apple.dt.devicekit.chrome.phone15",
+             "framebufferMaskIdentifier": "1C896A2B-F0D7-405C-8D0F-66E4B80AD044",
              "width": 1398, "height": 2034, "scale": 3],
             ["displayType": "integrated", "deviceName": "primary-1",
              "chromeIdentifier": "com.apple.dt.devicekit.chrome.phone14",
+             "framebufferMaskIdentifier": "BF0DC480-5EE2-4EC1-B02B-C75E94759832",
              "width": 2007, "height": 2853, "scale": 3],
         ]]]
         return try! PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
@@ -40,6 +44,7 @@ struct LiveChromesTests {
 
     @Test func `a foldable's secondary panel is the unfolded panel's chrome`() throws {
         let store = MockChromeStore()
+        given(store).framebufferMaskPDF(identifier: .any).willThrow(StubError.notFound)
         let rasterizer = MockPDFRasterizer()
         let pdf = Data("PDF-14".utf8)
         let png = ChromeImage(data: Data("PNG-14".utf8), size: Size(width: 700, height: 1000))
@@ -60,6 +65,55 @@ struct LiveChromesTests {
         let assets = chromes.assets(forDeviceName: "iPhone Duo", panel: .secondary)
         #expect(assets?.chrome.identifier == "phone14")
         #expect(assets?.composite == png)
+    }
+
+    /// The mask is served with the chrome so the page clips the live
+    /// frame to the shape the simulator itself uses.
+    @Test func `a panel's chrome carries its framebuffer mask rasterized`() throws {
+        let store = MockChromeStore()
+        let rasterizer = MockPDFRasterizer()
+        let pdf = Data("PDF-14".utf8), maskPDF = Data("MASK-14".utf8)
+        let png = ChromeImage(data: Data("PNG-14".utf8), size: Size(width: 700, height: 1000))
+        let mask = ChromeImage(data: Data("MASKPNG".utf8), size: Size(width: 1252, height: 1780))
+        given(store).profilePlistData(deviceName: .value("iPhone Duo"))
+            .willReturn(Self.makePlist(chromeIdentifier: "com.apple.dt.devicekit.chrome.phone15"))
+        given(store).capabilitiesPlistData(deviceName: .value("iPhone Duo"))
+            .willReturn(Self.foldableCapabilities)
+        given(store).chromeJSONData(chromeIdentifier: .value("phone14"))
+            .willReturn(Data(String(decoding: Self.fixtureChromeJSON, as: UTF8.self)
+                .replacingOccurrences(of: "phone11", with: "phone14").utf8))
+        given(store).chromeAssetPDF(chromeIdentifier: .value("phone14"), imageName: .value("PhoneComposite"))
+            .willReturn(pdf)
+        given(store).framebufferMaskPDF(identifier: .value("BF0DC480-5EE2-4EC1-B02B-C75E94759832"))
+            .willReturn(maskPDF)
+        given(rasterizer).rasterize(pdfData: .value(pdf)).willReturn(png)
+        given(rasterizer).rasterize(pdfData: .value(maskPDF)).willReturn(mask)
+
+        let chromes = LiveChromes(store: store, rasterizer: rasterizer)
+        let assets = chromes.assets(forDeviceName: "iPhone Duo", panel: .secondary)
+        #expect(assets?.screenMask == mask)
+    }
+
+    /// A missing mask file must not cost the bezel.
+    @Test func `an unreadable mask leaves the chrome without one`() throws {
+        let store = MockChromeStore()
+        let rasterizer = MockPDFRasterizer()
+        let pdf = Data("PDF-14".utf8)
+        let png = ChromeImage(data: Data("PNG-14".utf8), size: Size(width: 700, height: 1000))
+        given(store).profilePlistData(deviceName: .any)
+            .willReturn(Self.makePlist(chromeIdentifier: "com.apple.dt.devicekit.chrome.phone15"))
+        given(store).capabilitiesPlistData(deviceName: .any).willReturn(Self.foldableCapabilities)
+        given(store).chromeJSONData(chromeIdentifier: .any)
+            .willReturn(Data(String(decoding: Self.fixtureChromeJSON, as: UTF8.self)
+                .replacingOccurrences(of: "phone11", with: "phone14").utf8))
+        given(store).chromeAssetPDF(chromeIdentifier: .any, imageName: .any).willReturn(pdf)
+        given(store).framebufferMaskPDF(identifier: .any).willThrow(StubError.notFound)
+        given(rasterizer).rasterize(pdfData: .value(pdf)).willReturn(png)
+
+        let chromes = LiveChromes(store: store, rasterizer: rasterizer)
+        let assets = chromes.assets(forDeviceName: "iPhone Duo", panel: .secondary)
+        #expect(assets?.composite == png)
+        #expect(assets?.screenMask == nil)
     }
 
     @Test func `a single-panel device has no secondary panel`() {
