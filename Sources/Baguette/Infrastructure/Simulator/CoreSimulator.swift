@@ -98,8 +98,10 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
         SimulatorKitDisplays(udid: udid, host: host, hinge: hinge())
     }
 
+    /// One monitor per device: sockets share a watch and binds read the
+    /// last sample while it runs. See `SharedHinge`.
     func hinge() -> any Hinge {
-        DevicectlHinge(udid: udid)
+        SharedHinge.forDevice(udid) { DevicectlHinge(udid: udid) }
     }
 
     func externalDisplays() -> any ExternalDisplays {
@@ -115,7 +117,8 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
                 guard let sized = try? SimulatorKitFramebufferPorts.sizedPorts(udid: udid, host: host),
                       IntegratedPanels.several(in: sized),
                       let binding = try? SimulatorKitDisplays(
-                          udid: udid, host: host, hinge: DevicectlHinge(udid: udid)
+                          udid: udid, host: host,
+                          hinge: SharedHinge.forDevice(udid) { DevicectlHinge(udid: udid) }
                       ).phone.resolve(),
                       let scale = Self.mainScreenScale(udid: udid, host: host),
                       let size = binding.pointSize(scale: scale)

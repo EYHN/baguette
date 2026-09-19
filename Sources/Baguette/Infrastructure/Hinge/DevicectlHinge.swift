@@ -14,13 +14,15 @@ import Foundation
 /// integration-only.
 final class DevicectlHinge: Hinge, @unchecked Sendable {
     private let udid: String
-    private let subprocess: any Subprocess
+    /// A fresh child per call: `angle()` and each `watch` own their
+    /// own monitor and terminate only that one.
+    private let subprocess: () -> any Subprocess
     private let xcrun: URL
     private let deadline: TimeInterval
 
     init(
         udid: String,
-        subprocess: any Subprocess = HostSubprocess(),
+        subprocess: @escaping () -> any Subprocess = { HostSubprocess() },
         xcrun: URL = URL(fileURLWithPath: "/usr/bin/xcrun"),
         deadline: TimeInterval = 3
     ) {
@@ -48,16 +50,11 @@ final class DevicectlHinge: Hinge, @unchecked Sendable {
             }
         }
         let state = State()
+        let child = subprocess()
         do {
-            try subprocess.run(
+            try child.run(
                 executable: xcrun,
-                arguments: [
-                    "devicectl", "device", "motion", "hinge-angle",
-                    "--device", udid,
-                    // devicectl refuses anything under 5; the child is
-                    // terminated long before that.
-                    "--timeout", "5",
-                ],
+                arguments: Self.arguments(udid: udid, timeout: 5, everyChange: false),
                 onBytes: { bytes in
                     state.lock.lock()
                     let lines = state.buffer.append(bytes)
@@ -76,7 +73,70 @@ final class DevicectlHinge: Hinge, @unchecked Sendable {
         }
         _ = state.done.wait(timeout: .now() + deadline)
         state.settle(nil)
-        subprocess.terminate()
+        child.terminate()
         return state.reading
+    }
+
+    func watch(onAngle: @escaping @Sendable (HingeAngle) -> Void) -> any HingeWatch {
+        let watch = Watch(child: subprocess())
+        do {
+            try watch.child.run(
+                executable: xcrun,
+                arguments: Self.arguments(udid: udid, timeout: 86_400, everyChange: true),
+                onBytes: { bytes in
+                    for line in watch.lines(from: bytes) {
+                        if let angle = HingeAngle.parse(devicectlLine: line) {
+                            onAngle(angle)
+                        }
+                    }
+                },
+                onExit: { _ in watch.cancel() }
+            )
+        } catch {
+            watch.cancel()
+        }
+        return watch
+    }
+
+    /// `everyChange` asks for the 60 Hz sweep Device Hub produces
+    /// rather than the monitor's default 1° / 1 s cadence. devicectl
+    /// refuses a `--timeout` under 5.
+    private static func arguments(udid: String, timeout: Int, everyChange: Bool) -> [String] {
+        var args = [
+            "devicectl", "device", "motion", "hinge-angle",
+            "--device", udid,
+            "--timeout", "\(timeout)",
+        ]
+        if everyChange {
+            args += ["--update-interval", "0.01", "--change-threshold", "0.1"]
+        }
+        return args
+    }
+
+    private final class Watch: HingeWatch, @unchecked Sendable {
+        let child: any Subprocess
+        private let lock = NSLock()
+        private var buffer = LineBuffer()
+        private var cancelled = false
+
+        init(child: any Subprocess) { self.child = child }
+
+        /// Lines completed by `bytes`, or none once cancelled — a
+        /// sample the pipe still held must not reach a caller that has
+        /// moved on.
+        func lines(from bytes: Data) -> [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !cancelled else { return [] }
+            return buffer.append(bytes)
+        }
+
+        func cancel() {
+            lock.lock()
+            let first = !cancelled
+            cancelled = true
+            lock.unlock()
+            if first { child.terminate() }
+        }
     }
 }

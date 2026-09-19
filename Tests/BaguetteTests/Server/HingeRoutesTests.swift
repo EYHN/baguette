@@ -78,3 +78,13 @@ struct HingeRoutesTests {
         #expect(Server.hingeJSON(udid: "nope", simulators: simulators, chromes: chromes) == nil)
     }
 }
+
+/// What the stream socket pushes to the page for each hinge sample, so
+/// the page can draw the fold at the angle the runtime is at.
+@Suite("Server hinge message")
+struct HingeMessageTests {
+    @Test func `a sample is a hinge envelope with its angle`() {
+        #expect(Server.hingeMessage(HingeAngle(degrees: 130)) == #"{"type":"hinge","angleDegrees":130.0}"#)
+        #expect(Server.hingeMessage(HingeAngle(degrees: 3.8)) == #"{"type":"hinge","angleDegrees":3.8}"#)
+    }
+}

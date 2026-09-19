@@ -39,7 +39,7 @@ struct DevicectlHingeTests {
             feed(captures)
         }
         given(sub).terminate().willReturn()
-        let hinge = DevicectlHinge(udid: "duo", subprocess: sub, deadline: 0.5)
+        let hinge = DevicectlHinge(udid: "duo", subprocess: { sub }, deadline: 0.5)
         return (hinge, sub, captures)
     }
 
@@ -99,7 +99,72 @@ struct DevicectlHingeTests {
         given(sub).run(
             executable: .any, arguments: .any, onBytes: .any, onExit: .any
         ).willThrow(NSError(domain: "spawn", code: 1))
-        let hinge = DevicectlHinge(udid: "duo", subprocess: sub, deadline: 0.5)
+        let hinge = DevicectlHinge(udid: "duo", subprocess: { sub }, deadline: 0.5)
         #expect(hinge.angle() == nil)
+    }
+
+    // MARK: - watch
+
+    /// Device Hub animates a pose change as a 0.5–0.85 s sweep of
+    /// samples at 60 Hz (measured: 3.8° → 130° in 0.84 s, ease-out).
+    /// A watch hands every sample on, in order, for as long as it runs.
+    @Test func `a watch delivers every sample in order`() {
+        final class Seen: @unchecked Sendable { var angles: [Double] = [] }
+        let seen = Seen()
+        let (hinge, _, captures) = makeHinge { _ in }
+        let watch = hinge.watch { seen.angles.append($0.degrees) }
+        captures.onBytes?(Data((banner
+            + "• +0.000s : Angle:  3.8°  Mech:  3.8°  Velocity:+0.0°/s  AngleValid:Y  VelocityValid:N  Range:0-180°\n"
+            + "• +0.030s : Angle: 16.2°  Mech: 16.2°  Velocity:+0.0°/s  AngleValid:Y  VelocityValid:N  Range:0-180°\n").utf8))
+        captures.onBytes?(Data("• +0.080s : Angle: 88.2°  Mech: 88.2°  Velocity:+0.0°/s  AngleValid:Y  VelocityValid:N  Range:0-180°\n".utf8))
+        #expect(seen.angles == [3.8, 16.2, 88.2])
+        watch.cancel()
+    }
+
+    /// The monitor is asked for every change, not the default 1° / 1 s
+    /// cadence, and for as long as a session could plausibly last.
+    @Test func `a watch asks devicectl for every change for a long time`() {
+        let (hinge, _, captures) = makeHinge { _ in }
+        let watch = hinge.watch { _ in }
+        let args = captures.arguments ?? []
+        #expect(args.prefix(4) == ["devicectl", "device", "motion", "hinge-angle"])
+        #expect(args.contains("--change-threshold"))
+        #expect(args.contains("--update-interval"))
+        if let i = args.firstIndex(of: "--timeout"), i + 1 < args.count {
+            #expect(Int(args[i + 1]) ?? 0 >= 3600)
+        } else {
+            Issue.record("no --timeout")
+        }
+        watch.cancel()
+    }
+
+    @Test func `cancelling a watch terminates the monitor`() {
+        let (hinge, sub, _) = makeHinge { _ in }
+        let watch = hinge.watch { _ in }
+        watch.cancel()
+        verify(sub).terminate().called(1)
+    }
+
+    /// Nothing after cancel: a sample the pipe still had buffered must
+    /// not reach a caller that has moved on.
+    @Test func `a cancelled watch drops late samples`() {
+        final class Seen: @unchecked Sendable { var count = 0 }
+        let seen = Seen()
+        let (hinge, _, captures) = makeHinge { _ in }
+        let watch = hinge.watch { _ in seen.count += 1 }
+        watch.cancel()
+        captures.onBytes?(Data(sample.utf8))
+        #expect(seen.count == 0)
+    }
+
+    @Test func `a watch on a device without a hinge delivers nothing`() {
+        final class Seen: @unchecked Sendable { var count = 0 }
+        let seen = Seen()
+        let (hinge, _, captures) = makeHinge { _ in }
+        let watch = hinge.watch { _ in seen.count += 1 }
+        captures.onBytes?(Data("Error: Hinge angle monitoring is not available on this device.\n".utf8))
+        captures.onExit?(1)
+        #expect(seen.count == 0)
+        watch.cancel()
     }
 }

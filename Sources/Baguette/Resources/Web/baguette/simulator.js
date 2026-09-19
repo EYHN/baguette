@@ -29,7 +29,12 @@
       this.log = log || (() => {});
       this.screen   = new root.Baguette._Screen(def.screen, transport,
                           { getOrientation: this.getOrientation, log: this.log });
-      this.buttons  = (def.buttons || []).map(b => new root.Baguette._Button(b, transport));
+      // A cap is positioned in percent of the bare viewport and clipped
+      // to the body plus its margins (see Button.clipInset), so each
+      // one is handed the screen's frame of reference alongside its own.
+      const frame = { viewport: def.screen.viewport, buttonMargins: def.screen.buttonMargins };
+      this.buttons  = (def.buttons || []).map(
+        b => new root.Baguette._Button(Object.assign({}, frame, b), transport));
       // Optional parts: instantiated iff the definition carries the
       // field. Apple TV omits `keyboard`; Apple Watch will populate
       // `crown` when that part lands.

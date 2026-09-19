@@ -37,6 +37,19 @@ struct SimulatorDefinitionTests {
         #expect(def.screen.viewport == Size(width: 400, height: 800))
     }
 
+    /// The baked composite clips each button to the body plus its
+    /// margins; the SDK overlay has to clip to the same canvas, so the
+    /// margins ride along in the definition.
+    @Test func `screen carries the button margins the bake clipped to`() throws {
+        let def = Self.composeFixtureWithMargins()
+        #expect(def.screen.buttonMargins == Insets(top: 10, left: 10, bottom: 10, right: 10))
+        let json = try #require(def.toJSON().data(using: .utf8))
+        let root = try #require(try JSONSerialization.jsonObject(with: json) as? [String: Any])
+        let screen = try #require(root["screen"] as? [String: Any])
+        let margins = try #require(screen["buttonMargins"] as? [String: Double])
+        #expect(margins == ["top": 10, "left": 10, "bottom": 10, "right": 10])
+    }
+
     @Test func `screen rect is in bare-bezel coordinates`() {
         let def = Self.composeFixtureWithMargins()
         // chrome insets are {top:20, left:10, bottom:20, right:10} on

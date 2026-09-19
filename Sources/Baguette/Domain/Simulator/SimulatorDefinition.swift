@@ -55,6 +55,11 @@ struct SimulatorDefinition: Equatable, Sendable {
         let rect: Rect
         /// Inner-corner radius for the screen cutout, chrome pixels.
         let clipRadius: Double
+        /// How far past the bare body a button cap may show, per edge,
+        /// in chrome pixels — the canvas the baked composite clipped
+        /// caps to. The SDK clips its overlays to the same canvas so a
+        /// cap drawn behind the body protrudes by the same nub.
+        let buttonMargins: Insets
         /// Bezel image URLs. `rest` is the merged composite (default),
         /// `bare` is the device body with buttons stripped — the
         /// SDK fetches `bare` when buttons are rendered as separate
@@ -170,6 +175,12 @@ extension SimulatorDefinition {
                     "height": screen.rect.size.height,
                 ],
                 "clipRadius": screen.clipRadius,
+                "buttonMargins": [
+                    "top":    screen.buttonMargins.top,
+                    "left":   screen.buttonMargins.left,
+                    "bottom": screen.buttonMargins.bottom,
+                    "right":  screen.buttonMargins.right,
+                ],
                 "bezelImage": [
                     "rest": screen.bezelImage.rest,
                     "bare": screen.bezelImage.bare,
@@ -261,6 +272,7 @@ extension SimulatorDefinition {
                 viewport:   bare,
                 rect:       screenRect,
                 clipRadius: chrome.innerCornerRadius,
+                buttonMargins: m,
                 bezelImage: BezelImage(
                     rest: "\(urlPrefix)/bezel.png",
                     bare: "\(urlPrefix)/bezel.png?buttons=false"

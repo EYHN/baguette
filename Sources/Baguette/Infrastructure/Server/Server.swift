@@ -780,13 +780,14 @@ struct Server: Sendable {
         router.ws(
             "/simulators/:udid/stream",
             shouldUpgrade: trustedWebSocketUpgrade
-        ) { [simulators] inbound, outbound, context in
+        ) { [simulators, chromes] inbound, outbound, context in
             await Self.streamWS(
                 udid: Self.udidParam(context.request),
                 format: context.request.uri.queryParameters.get("format")
                     .flatMap { StreamFormat(rawValue: $0) } ?? .mjpeg,
                 displayQuery: context.request.uri.queryParameters.get("display"),
                 simulators: simulators,
+                chromes: chromes,
                 inbound: inbound,
                 outbound: outbound
             )
@@ -877,6 +878,7 @@ struct Server: Sendable {
         "baguette",
         "baguette/carplay",
         "baguette/gestures",
+        "baguette/hinge",
         "baguette/parts",
         "capture",
         "carplay-frames",
@@ -1488,6 +1490,11 @@ struct Server: Sendable {
     /// Reporting an unknown device as one with no conditioning would read
     /// as reassurance about a simulator that doesn't exist, which is the
     /// wrong answer to give a badge whose whole job is being believed.
+    /// One hinge sample as the stream socket pushes it to the page.
+    static func hingeMessage(_ angle: HingeAngle) -> String {
+        #"{"type":"hinge","angleDegrees":\#(angle.degrees)}"#
+    }
+
     /// Pure data producer for `GET /simulators/<udid>/hinge`.
     ///
     /// `foldable` comes from the profile (does the device have a second
@@ -2673,6 +2680,7 @@ struct Server: Sendable {
         format: StreamFormat,
         displayQuery: String?,
         simulators: any Simulators,
+        chromes: any Chromes,
         inbound: WebSocketInboundStream,
         outbound: WebSocketOutboundWriter
     ) async {
@@ -2719,7 +2727,20 @@ struct Server: Sendable {
             ))
             return
         }
+        // A foldable's hinge rides the same socket: every sample Device
+        // Hub sweeps through lands here as `{"type":"hinge",…}`, so the
+        // page can draw the fold at the angle the device is at and knows
+        // the moment the lit panel is about to change. A phone has no
+        // hinge and is not watched.
+        let foldable = displayPlan.kind == .phone
+            && chromes.panels(forDeviceName: sim.deviceTypeName).contains(.secondary)
+        let hingeWatch: (any HingeWatch)? = foldable
+            ? sim.hinge().watch { angle in
+                Task { try? await outbound.write(.text(Self.hingeMessage(angle))) }
+            }
+            : nil
         defer {
+            hingeWatch?.cancel()
             stream.stop()
             screen.stop()
         }

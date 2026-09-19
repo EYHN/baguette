@@ -425,7 +425,9 @@
     // way the lit panel faces, and the page takes that instead.
     const hinge = deviceMode ? null : await readHinge();
     if (hinge && hinge.foldable) {
+      currentLitPanel = hinge.litPanel || 'primary';
       if (hinge.orientation && hinge.orientation !== 'portrait') applyOrientation(hinge.orientation);
+      unfoldIn();
     } else if (isBooted(meta.state)) {
       resetToPortrait();
     }
@@ -467,10 +469,117 @@
       if (!state) return;
       if (!state.foldable) { clearInterval(hingeTimer); hingeTimer = null; return; }
       if (hingePose === null) { hingePose = poseOf(state); return; }
-      if (poseOf(state) !== hingePose) location.reload();
+      // The socket's hinge samples own the transition when they flow;
+      // the poll only steps in for a page whose socket is not up.
+      if (poseOf(state) !== hingePose && Date.now() - hingeLiveAt > 5000) {
+        clearInterval(hingeTimer); hingeTimer = null;
+        location.reload();
+      }
     };
     poll();
     hingeTimer = setInterval(poll, 2000);
+  }
+
+  // The fold, drawn from the runtime's own hinge.
+  //
+  // On a foldable the stream socket also carries `{"type":"hinge"}`
+  // samples — the 60 Hz sweep Device Hub plays for a pose change (0°
+  // closed, 130° open, 180° flat; 0.5–0.85 s, ease-out). While a sweep
+  // is running and this page has the unfolded panel, `FoldView` draws
+  // the live device as a book at each sample's angle. When the sweep
+  // settles on the other side of 90° the lit panel has changed, so the
+  // page hands the recorded sweep over sessionStorage and reloads;
+  // the page that arrives at the unfolded panel replays it with the
+  // same timing on its own live frame, and the one that arrives at the
+  // cover simply rises. The poll below stays as the fallback for a
+  // page whose socket is not up.
+  const FOLD_KEY = 'baguette.hinge.transition';
+  const SWEEP_QUIET_MS = 300;
+  let currentLitPanel = 'primary';
+  let foldView = null;
+  let liveSweep = null;
+  let sweepSettleTimer = null;
+  let hingeLiveAt = 0;
+
+  function fold() {
+    if (!foldView && window.Baguette && window.Baguette._FoldView) {
+      foldView = new window.Baguette._FoldView(
+        document.getElementById('nativeDeviceFrame'), () => rotationDegrees);
+    }
+    return foldView;
+  }
+
+  function onHingeSample(degrees) {
+    if (typeof degrees !== 'number' || !window.Baguette || !window.Baguette.HingeSweep) return;
+    hingeLiveAt = Date.now();
+    if (!liveSweep) liveSweep = new window.Baguette.HingeSweep();
+    liveSweep.push(degrees, Date.now());
+    // One sample is the standing angle on connect; two or more is motion.
+    if (liveSweep.length > 1 && currentLitPanel === 'secondary') {
+      const view = fold();
+      if (view) view.update(degrees);
+    }
+    clearTimeout(sweepSettleTimer);
+    sweepSettleTimer = setTimeout(onSweepSettled, SWEEP_QUIET_MS);
+  }
+
+  function onSweepSettled() {
+    const sweep = liveSweep;
+    liveSweep = null;
+    if (!sweep) return;
+    if (sweep.length < 2 || sweep.litPanel === currentLitPanel) {
+      if (foldView) foldView.hide();
+      return;
+    }
+    try {
+      sessionStorage.setItem(FOLD_KEY, JSON.stringify({
+        at: Date.now(), to: sweep.litPanel, sweep: sweep.toJSON(),
+      }));
+    } catch (e) { /* no hand-off */ }
+    location.reload();
+  }
+
+  // Runs at boot on a foldable: replays a handed-over sweep on the
+  // unfolded panel once the stream has painted, or rises onto the cover.
+  function unfoldIn() {
+    let hand = null;
+    try {
+      hand = JSON.parse(sessionStorage.getItem(FOLD_KEY) || 'null');
+      sessionStorage.removeItem(FOLD_KEY);
+    } catch (e) { return; }
+    if (!hand || typeof hand !== 'object' || Date.now() - Number(hand.at) > 15000) return;
+    if (hand.to !== 'secondary' || !window.Baguette || !window.Baguette.HingeSweep) { rise(); return; }
+    const sweep = window.Baguette.HingeSweep.fromJSON(hand.sweep);
+    if (sweep.length < 2) { rise(); return; }
+    const view = fold();
+    if (!view) return;
+    // Open shut, so the first painted frame is not seen flat before the turn.
+    view.update(sweep.from);
+    const startedAt = Date.now();
+    const whenPainted = () => {
+      if ((session && session.frameCount > 0) || Date.now() - startedAt > 3000) {
+        const ms = sweep.replay((a) => view.update(a));
+        setTimeout(() => view.hide(), ms + 120);
+      } else {
+        setTimeout(whenPainted, 50);
+      }
+    };
+    whenPainted();
+  }
+
+  function rise() {
+    const root = document.getElementById('nativeDeviceFrame');
+    if (!root) return;
+    const ms = 220;
+    root.style.transition = 'none';
+    root.style.opacity = '0';
+    root.style.transform = 'scale(0.96)';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      root.style.transition = `opacity ${ms}ms ease-out, transform ${ms}ms ease-out`;
+      root.style.opacity = '';
+      root.style.transform = '';
+      setTimeout(() => { root.style.transition = ''; }, ms + 50);
+    }));
   }
 
   function resetToPortrait() {
@@ -541,6 +650,7 @@
     // to the inspector first, then claim paste_result; anything
     // nobody claims falls through to the decoder's error logger.
     const onStreamText = (env) => {
+      if (env && env.type === 'hinge') { onHingeSample(env.angleDegrees); return true; }
       if (axInspector && axInspector.handleEnvelope(env)) return true;
       if (env && env.type === 'paste_result') {
         if (!env.ok) console.warn('[native] paste failed:', env.error || 'unknown');

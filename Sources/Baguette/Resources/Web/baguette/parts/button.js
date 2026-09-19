@@ -24,6 +24,40 @@
       this.element = null;
     }
 
+    /**
+     * CSS `clip-path` inset that trims a cap to the canvas the baked
+     * composite drew on — the body plus `buttonMargins` — or `null`
+     * when the cap already sits inside it.
+     *
+     * DeviceKit's caps are drawn *behind* the body and clipped by the
+     * bake's canvas, so only the part in the margin shows as a nub.
+     * The overlay is not clipped by anything, and iPhone Duo's
+     * unfolded chrome (`phone14`) anchors a 16×107 power cap on the
+     * top edge: 95 px of it stood above the body as a bar where the
+     * bake shows 10 px. Insets are in percent of the cap's own box,
+     * which is what `clip-path: inset()` resolves against.
+     *
+     * @param {{leftPct,topPct,widthPct,heightPct}} box  in % of `viewport`
+     * @param {{width,height}} viewport                  bare size, chrome px
+     * @param {{top,left,bottom,right}=} margins         chrome px; none → body only
+     */
+    static clipInset(box, viewport, margins) {
+      const m = margins || { top: 0, left: 0, bottom: 0, right: 0 };
+      const left = box.leftPct / 100 * viewport.width;
+      const top = box.topPct / 100 * viewport.height;
+      const w = box.widthPct / 100 * viewport.width;
+      const h = box.heightPct / 100 * viewport.height;
+      if (w <= 0 || h <= 0) return null;
+      const x0 = -m.left, x1 = viewport.width + m.right;
+      const y0 = -m.top, y1 = viewport.height + m.bottom;
+      const pct = (px, of) => Math.max(0, px) / of * 100;
+      const t = pct(y0 - top, h), r = pct(left + w - x1, w);
+      const b = pct(top + h - y1, h), l = pct(x0 - left, w);
+      if (t === 0 && r === 0 && b === 0 && l === 0) return null;
+      const f = (v) => (Math.round(v * 100) / 100).toFixed(2).replace(/\.?0+$/, '') + '%';
+      return `inset(${f(t)} ${f(r)} ${f(b)} ${f(l)})`;
+    }
+
     /** Public domain verb. Hold is seconds. */
     press({ hold = 0 } = {}) {
       this.transport.button(this.def.envelope, { hold });
@@ -57,6 +91,8 @@
         '-webkit-user-select:none', 'user-select:none',
       ].join(';');
       if (tf.rest && tf.rest !== 'none') btn.style.transform = tf.rest;
+      const clip = Button.clipInset(box, this.def.viewport, this.def.buttonMargins);
+      if (clip) btn.style.clipPath = clip;
 
       const img = new Image();
       img.src = this.def.images.rest;
