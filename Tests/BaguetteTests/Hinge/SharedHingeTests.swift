@@ -160,11 +160,19 @@ struct SharedHingeTests {
     }
 
     /// A failed read is not remembered — the next caller tries again.
-    @Test func `a read that returns nothing is not cached`() {
+    @Test func `a read that returns nothing is not cached as an angle, but is not retried at once`() {
+        // A silent hinge (the guest's motion stream can drop after a
+        // SpringBoard restart) makes every read wait out its deadline;
+        // callers queue behind the serialised read and the server
+        // stalls. The silence is remembered for a short while instead.
+        var clock = Date(timeIntervalSince1970: 1_000)
         let inner = Inner()
         given(inner.hinge).angle().willReturn(nil)
-        let shared = SharedHinge(inner: inner.hinge)
+        let shared = SharedHinge(inner: inner.hinge, now: { clock })
         #expect(shared.angle() == nil)
+        #expect(shared.angle() == nil)
+        verify(inner.hinge).angle().called(1)
+        clock = clock.addingTimeInterval(SharedHinge.silencePeriod + 0.1)
         #expect(shared.angle() == nil)
         verify(inner.hinge).angle().called(2)
     }

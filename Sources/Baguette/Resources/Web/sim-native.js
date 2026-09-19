@@ -352,6 +352,19 @@
         ? window.BaguetteTarget.path(udid, '/definition.json')
             + (chromePick ? '?chrome=' + encodeURIComponent(chromePick) : '')
         : undefined;
+    // A foldable is a book, and its book is Apple's own 3D model
+    // (`V68.usdz`, the one Device Hub draws) posed by the hinge, with
+    // both panels on its screens. Its main view is the live 3D stream
+    // straight on, taps landing on whichever screen is lit, and the
+    // flat chrome never shows for it while the guest is up — the cube
+    // button turns the book instead of leaving 3D. The flat chrome
+    // still carries the power card for a device that is not booted.
+    const hinge = deviceMode ? null : await readHinge();
+    foldable = !!(hinge && hinge.foldable);
+    if (foldable) currentLitPanel = hinge.litPanel || 'primary';
+    if (foldable && isBooted(meta.state)) {
+      document.getElementById('nativeDeviceFrame').setAttribute('data-foldable', '');
+    }
     try {
       sim = await useSimulator(deviceDefinitionURL);
       sim.mount(document.getElementById('nativeDeviceFrame'));
@@ -387,7 +400,7 @@
     //    the device's own screen instead and start the stream once
     //    the user boots it (or once the boot already underway lands).
     if (sim && isBooted(meta.state)) {
-      startSession(currentFormat());
+      startMainView();
     } else {
       showPowerCard(sim ? meta.state : '');
     }
@@ -430,17 +443,7 @@
     // the moment the home screen shows — so forcing portrait would
     // leave the page fighting the device. The hinge poll says which
     // way the lit panel faces, and the page takes that instead.
-    const hinge = deviceMode ? null : await readHinge();
-    if (hinge && hinge.foldable) {
-      // A foldable is a book, and its book is Apple's own 3D model
-      // (`V68.usdz`, the one Device Hub draws) posed by the hinge, with
-      // both panels on its screens. So the page shows the live 3D
-      // stream straight on, taps landing on whichever screen is lit;
-      // the cube button lets it be turned.
-      currentLitPanel = hinge.litPanel || 'primary';
-      foldable = true;
-      if (sim && isBooted(meta.state)) toggle3D({ fixed: true });
-    } else if (isBooted(meta.state)) {
+    if (!foldable && isBooted(meta.state)) {
       resetToPortrait();
     }
 
@@ -528,6 +531,8 @@
   /** The slide between the shut book and the cover in its own place. */
   const SWAP_MOVE_MS = 260;
   let currentLitPanel = 'primary';
+  /** iPhone Duo: two panels and a hinge; the page shows its book in 3D. */
+  let foldable = false;
   let foldView = null;
   let liveSweep = null;
   let sweepSettleTimer = null;
@@ -1348,9 +1353,21 @@
   // static screen may not composite anything for a while.
   function onBooted() {
     renderPowerCard('starting');
-    startSession(currentFormat());
-    resetToPortrait();
+    startMainView();
+    if (!foldable) resetToPortrait();
     firstFrameTimer = setTimeout(hidePowerCard, FIRST_FRAME_TIMEOUT_MS);
+  }
+
+  // The live view of a booted guest: the flat stream in the device's
+  // chrome, or — on a foldable — the book, straight on.
+  function startMainView() {
+    if (foldable) {
+      const frame = document.getElementById('nativeDeviceFrame');
+      if (frame) frame.setAttribute('data-foldable', '');
+      toggle3D({ fixed: true });
+      return;
+    }
+    startSession(currentFormat());
   }
 
   // Lazy-mounts the AXInspector once a surface + session are ready.
@@ -2381,7 +2398,6 @@
   // Live 3D is a main-view mode, not a duplicate preview. Its WebSocket
   // replaces the 2D StreamSession while open and carries both MJPEG
   // frames and the same inbound input/control envelopes.
-  let foldable = false;
   function toggle3D(opts) {
     const view = document.getElementById('simNativeView');
     const host = document.getElementById('native3DHost');

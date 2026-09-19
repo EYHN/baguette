@@ -59,14 +59,31 @@ final class SharedHinge: Hinge, @unchecked Sendable {
     /// once bound the unfolded panel's stream under the cover's chrome.
     private let readLock = NSLock()
 
+    /// How long a silent hinge is taken at its word. A read that heard
+    /// nothing waited out its deadline; asking again at once would make
+    /// every caller queue behind another such wait, and the server
+    /// would stall for as long as the guest's motion stream is down.
+    static let silencePeriod: TimeInterval = 3
+    private var silentSince: Date?
+
     func angle() -> HingeAngle? {
         if let cached = fresh() { return cached }
         readLock.lock()
         defer { readLock.unlock() }
         if let cached = fresh() { return cached }
-        guard let read = inner.angle() else { return nil }
+        lock.lock()
+        let silent = silentSince.map { now().timeIntervalSince($0) < Self.silencePeriod } ?? false
+        lock.unlock()
+        if silent { return nil }
+        guard let read = inner.angle() else {
+            lock.lock()
+            silentSince = now()
+            lock.unlock()
+            return nil
+        }
         lock.lock()
         last = (read, now())
+        silentSince = nil
         lock.unlock()
         return read
     }

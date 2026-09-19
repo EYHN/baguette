@@ -32,4 +32,9 @@ protocol DeviceScene: AnyObject, Sendable {
     /// mapping browser clicks back onto the device screen without ray
     /// casting into the GPU scene. `nil` until the first render/update.
     var screenQuad: ScreenQuad? { get }
+
+    /// A foldable's lit screen as flat pieces in the rendered image
+    /// (`FoldedScreenProjection`), replacing `screenQuad`; nil on a
+    /// phone.
+    var screenPieces: [ScreenPiece]? { get }
 }

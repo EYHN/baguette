@@ -1588,6 +1588,8 @@
   #simNativeView .r3d-live-stage[data-mode="interact"] .r3d-live-canvas {
     cursor: crosshair;
   }
+  /* A booted foldable never shows the flat chrome: its view is the book. */
+  #simNativeView #nativeDeviceFrame[data-foldable] { display: none; }
   /* Fixed 3D (a foldable's default view): straight on, no tools. */
   #simNativeView #native3DStage[data-fixed="true"] .r3d-stage-tools,
   #simNativeView #native3DStage[data-fixed="true"] .r3d-inspector-toggle {

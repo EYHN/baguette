@@ -239,7 +239,9 @@
       onText: (envelope) => {
         if (generation !== this.generation) return false;
         if (envelope && envelope.type === 'screen_quad') {
-          this.screenQuad = window.Baguette._ScreenQuad.fromCorners(envelope.corners);
+          // One quad for a phone; a foldable's lit screen in pieces.
+          const pieces = window.Baguette._ScreenPieces.fromMessage(envelope);
+          this.screenQuad = pieces.length ? pieces : null;
           return true;
         }
         if (envelope && envelope.type === 'gyro') {

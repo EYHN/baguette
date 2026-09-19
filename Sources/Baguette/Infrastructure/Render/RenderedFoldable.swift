@@ -25,19 +25,34 @@ final class RenderedFoldable: Screen, @unchecked Sendable {
     private var pending = false
     private var latest = FoldableScreens(unfolded: nil, cover: nil)
     private var isStopped = true
+    /// A scene starts flat. Nothing is composed until the book has been
+    /// posed, or the first frame would show it open when shut.
+    private var isPosed = false
 
-    init(unfolded: any Screen, cover: any Screen, hinge: any Hinge, scene: any DeviceScene) {
+    private let onPose: @Sendable () -> Void
+
+    /// `onPose` runs after each hinge sample has posed the scene.
+    init(
+        unfolded: any Screen, cover: any Screen, hinge: any Hinge, scene: any DeviceScene,
+        onPose: @escaping @Sendable () -> Void = {}
+    ) {
         self.unfolded = unfolded
         self.cover = cover
         self.hinge = hinge
         self.scene = scene
+        self.onPose = onPose
     }
 
     func start(onFrame: @escaping @Sendable (IOSurface) -> Void) throws {
         lock.withLock {
             delivery = onFrame
             isStopped = false
+            isPosed = false
         }
+        // A silent hinge (the guest's motion stream can drop) still
+        // gets a book: shut, as the device boots, until it speaks.
+        scene.update(hingeDegrees: hinge.angle()?.degrees ?? 0)
+        lock.withLock { isPosed = true }
         do {
             try unfolded.start { [weak self] surface in
                 self?.take { FoldableScreens(unfolded: surface, cover: $0.cover) }
@@ -52,6 +67,8 @@ final class RenderedFoldable: Screen, @unchecked Sendable {
         let watch = hinge.watch { [weak self] angle in
             guard let self else { return }
             self.scene.update(hingeDegrees: angle.degrees)
+            self.lock.withLock { self.isPosed = true }
+            self.onPose()
             self.refresh()
         }
         lock.withLock { self.watch = watch }
@@ -80,7 +97,7 @@ final class RenderedFoldable: Screen, @unchecked Sendable {
         let shouldStart = lock.withLock {
             guard !isStopped else { return false }
             latest = update(latest)
-            guard latest.unfolded != nil || latest.cover != nil else { return false }
+            guard isPosed, latest.unfolded != nil || latest.cover != nil else { return false }
             if isRendering {
                 pending = true
                 return false

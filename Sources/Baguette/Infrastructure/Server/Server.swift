@@ -1940,6 +1940,41 @@ struct Server: Sendable {
         return String(data: data, encoding: .utf8)
     }
 
+    /// A foldable's lit screen as flat pieces — the unfolded panel bends
+    /// at the hinge — each with its corners in the framebuffer's order
+    /// and the part of the buffer it shows. Sent in `screen_quad`'s
+    /// place whenever the pose or the camera changes.
+    static func screenPiecesJSON(_ pieces: [ScreenPiece]) -> String? {
+        let object: [String: Any] = [
+            "type": "screen_quad",
+            "pieces": pieces.map { piece -> [String: Any] in
+                let q = piece.quad
+                return [
+                    "corners": [
+                        [q.topLeft.u, q.topLeft.v],
+                        [q.topRight.u, q.topRight.v],
+                        [q.bottomRight.u, q.bottomRight.v],
+                        [q.bottomLeft.u, q.bottomLeft.v],
+                    ],
+                    "u": [piece.u.lowerBound, piece.u.upperBound],
+                    "v": [piece.v.lowerBound, piece.v.upperBound],
+                ]
+            },
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// `screen_quad` for whatever the scene projects: a foldable's pieces
+    /// when it has them, else the one quad.
+    static func screenPlacementJSON(_ scene: any DeviceScene) -> String? {
+        if let pieces = scene.screenPieces { return screenPiecesJSON(pieces) }
+        if let quad = scene.screenQuad { return screenQuadJSON(quad) }
+        return nil
+    }
+
     static func model3DJSONString(
         udid: String,
         simulators: any Simulators,
@@ -2687,7 +2722,13 @@ struct Server: Sendable {
             let cover = sim.displays().panel(.primary)
             let book = RenderedFoldable(
                 unfolded: unfolded.screen(), cover: cover.screen(),
-                hinge: sim.hinge(), scene: scene
+                hinge: sim.hinge(), scene: scene,
+                onPose: {
+                    // The lit screen moved: tell the page where it is.
+                    if let json = screenPlacementJSON(scene) {
+                        Task { try? await outbound.write(.text(json)) }
+                    }
+                }
             )
             screen = book
             input = sim.input()
@@ -2721,7 +2762,7 @@ struct Server: Sendable {
             stream.stop()
         }
 
-        if let quad = scene.screenQuad, let json = screenQuadJSON(quad) {
+        if let json = screenPlacementJSON(scene) {
             try? await outbound.write(.text(json))
         }
 
@@ -2735,7 +2776,7 @@ struct Server: Sendable {
                         scene: scene
                     ) {
                         refresh()
-                        if let quad = scene.screenQuad, let json = screenQuadJSON(quad) {
+                        if let json = screenPlacementJSON(scene) {
                             try? await outbound.write(.text(json))
                         }
                         continue

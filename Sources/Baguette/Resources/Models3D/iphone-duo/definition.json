@@ -19,7 +19,7 @@
     "nativeOrientation": "landscape",
     "textureSize": {"width": 2007, "height": 2853},
     "usesScreenOverlay": false,
-    "textureRotation": 0,
+    "textureRotation": 270,
     "restRotation": {"x": 90, "y": 0, "z": 0},
     "fold": {
       "clip": "l_over_r",

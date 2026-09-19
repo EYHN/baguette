@@ -43,7 +43,11 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private var restOrientation = simd_quatf(angle: 0, axis: [0, 1, 0])
     private var foldController: AnimationPlaybackController?
     private var screenLocalCorners: ScreenLocalCorners!
+    private var coverLocalCorners: ScreenLocalCorners?
+    private var hingeDegrees: Double = 180
+    private var view = Device3DCamera(rotation: .zero, zoom: 1)
     private(set) var screenQuad: ScreenQuad?
+    private(set) var screenPieces: [ScreenPiece]?
     private var renderTargets: MetalRenderTargetRing!
     private var metalDevice: (any MTLDevice)!
     private var commandQueue: (any MTLCommandQueue)!
@@ -109,6 +113,8 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             self.rest.orientation = simd_quatf(
                 angle: Self.radians(pose.yawDegrees), axis: [0, 1, 0]
             ) * self.restOrientation
+            self.hingeDegrees = hingeDegrees
+            self.screenPieces = self.projectedScreenPieces()
         }
     }
 
@@ -118,11 +124,36 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             self.cameraEntity.position.z = Float(
                 self.cameraFraming.distance(at: requested.zoom)
             )
+            self.view = requested
             self.screenQuad = self.projectedScreenQuad(
                 rotation: requested.rotation,
                 zoom: requested.zoom
             )
+            self.screenPieces = self.projectedScreenPieces()
         }
+    }
+
+    /// A foldable's lit screen in the output image at the current hinge
+    /// angle and camera. The unfolded panel is landscape-left by the
+    /// guest's choice and the cover portrait, as `Simulator.litPanel`
+    /// and the page assume.
+    @MainActor
+    private func projectedScreenPieces() -> [ScreenPiece]? {
+        guard let fold = plan.model.definition.scene.fold,
+              let coverLocalCorners else { return nil }
+        let lit = HingeAngle(degrees: hingeDegrees).litPanel
+        return FoldedScreenProjection.pieces(
+            inner: screenLocalCorners,
+            cover: coverLocalCorners,
+            litPanel: lit,
+            orientation: lit == .secondary ? .landscapeLeft : .portrait,
+            hingeDegrees: hingeDegrees,
+            fold: fold,
+            rotation: view.rotation,
+            distance: cameraFraming.distance(at: view.zoom),
+            fieldOfViewDegrees: cameraFraming.fieldOfViewDegrees,
+            aspect: Double(plan.outputSize.width) / Double(plan.outputSize.height)
+        )
     }
 
     func update(pose: Attitude, zoom: Double) {
@@ -250,19 +281,28 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         subject.position -= subject.visualBounds(relativeTo: restEntity).center
         wrapperEntity.orientation = Self.orientation(plan.rotation)
 
-        let screenBounds = screen.visualBounds(relativeTo: wrapperEntity)
-        screenLocalCorners = ScreenLocalCorners.from(
-            center: Vector3(
-                x: Double(screenBounds.center.x),
-                y: Double(screenBounds.center.y),
-                z: Double(screenBounds.center.z)
-            ),
-            extents: Vector3(
-                x: Double(screenBounds.extents.x),
-                y: Double(screenBounds.extents.y),
-                z: Double(screenBounds.extents.z)
+        // Corners in the rest frame: relative to the wrapper, so the
+        // authored rest rotation is in and the requested one is not.
+        // From the screen's own mesh parts — a model may keep every
+        // material on one entity, whose bounds are the whole device.
+        let corners = { (slot: ScreenSlot) -> ScreenLocalCorners in
+            let bounds = Self.partBounds(of: slot.entity, materialIndex: slot.materialIndex, relativeTo: wrapperEntity)
+                ?? slot.entity.visualBounds(relativeTo: wrapperEntity)
+            return ScreenLocalCorners.from(
+                center: Vector3(
+                    x: Double(bounds.center.x),
+                    y: Double(bounds.center.y),
+                    z: Double(bounds.center.z)
+                ),
+                extents: Vector3(
+                    x: Double(bounds.extents.x),
+                    y: Double(bounds.extents.y),
+                    z: Double(bounds.extents.z)
+                )
             )
-        )
+        }
+        screenLocalCorners = corners(self.screen)
+        coverLocalCorners = coverScreen.map(corners)
 
         // A book's leaf stands up toward the camera as it shuts, so a
         // foldable is framed as deep as a leaf is wide.
@@ -304,7 +344,9 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             device: device
         )
 
+        view = Device3DCamera(rotation: plan.rotation, zoom: 1)
         screenQuad = projectedScreenQuad(rotation: plan.rotation, zoom: 1)
+        screenPieces = projectedScreenPieces()
 
         // The engine's MSAA covers lit geometry but skips the unlit
         // screen pass, so its content edge stair-steps on tilted poses.
@@ -506,6 +548,30 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     }
 
     // MARK: - entity helpers
+
+    /// The bounds of the mesh parts on one material, in `reference`'s
+    /// frame; nil when the entity has no such part.
+    @MainActor
+    private static func partBounds(
+        of entity: ModelEntity, materialIndex: Int, relativeTo reference: Entity
+    ) -> BoundingBox? {
+        guard let model = entity.model else { return nil }
+        var box: BoundingBox?
+        for mesh in model.mesh.contents.models {
+            for part in mesh.parts where part.materialIndex == materialIndex {
+                for position in part.positions.elements {
+                    let world = entity.convert(position: position, to: reference)
+                    if var current = box {
+                        current.formUnion(BoundingBox(min: world, max: world))
+                        box = current
+                    } else {
+                        box = BoundingBox(min: world, max: world)
+                    }
+                }
+            }
+        }
+        return box
+    }
 
     /// Turn a screen's texture coordinates by quarter turns, so frames
     /// whose rows run the other way from the mesh's UVs read upright.

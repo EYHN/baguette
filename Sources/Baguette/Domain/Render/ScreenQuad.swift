@@ -146,7 +146,7 @@ enum ScreenQuadProjection {
         )
     }
 
-    private static func projectRotated(
+    static func projectRotated(
         _ rotated: Vector3,
         distance: Double,
         fieldOfViewDegrees: Double,
@@ -179,7 +179,7 @@ enum ScreenQuadProjection {
     /// Applies world-X, then world-Y, then world-Z rotation — the same
     /// order `RealityKitDeviceScene.orientation(_:)`'s `qz * qy * qx`
     /// quaternion composition applies to a vector.
-    private static func rotate(_ v: Vector3, by rotation: DeviceRotation) -> Vector3 {
+    static func rotate(_ v: Vector3, by rotation: DeviceRotation) -> Vector3 {
         var point = v
         point = rotateX(point, degrees: rotation.x)
         point = rotateY(point, degrees: rotation.y)
@@ -198,7 +198,7 @@ enum ScreenQuadProjection {
         )
     }
 
-    private static func rotateY(_ v: Vector3, degrees: Double) -> Vector3 {
+    static func rotateY(_ v: Vector3, degrees: Double) -> Vector3 {
         let radians = degrees * .pi / 180
         let cosA = cos(radians)
         let sinA = sin(radians)
