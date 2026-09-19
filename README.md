@@ -291,7 +291,7 @@ baguette <command> [options]
   bakery remove <ref>
 
   # DeviceKit chrome / bezel data
-  chrome layout    --udid <UDID> | --device-name "iPhone 17 Pro"
+  chrome layout    --udid <UDID> | --device-name "iPhone 17 Pro" [--panel cover|unfolded]
   chrome composite --udid <UDID> | --device-name "iPhone 17 Pro"
 
   # One-shot gestures — same HID path as `input`, one gesture per

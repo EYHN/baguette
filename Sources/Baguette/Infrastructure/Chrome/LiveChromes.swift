@@ -29,7 +29,15 @@ final class LiveChromes: Chromes, @unchecked Sendable {
     }
 
     func assets(forDeviceName deviceName: String) -> DeviceChromeAssets? {
-        guard let profile = resolveProfile(deviceName: deviceName) else {
+        assets(forDeviceName: deviceName, panel: .primary)
+    }
+
+    func panels(forDeviceName deviceName: String) -> [IntegratedPanel] {
+        resolveProfile(deviceName: deviceName)?.panels ?? []
+    }
+
+    func assets(forDeviceName deviceName: String, panel: IntegratedPanel) -> DeviceChromeAssets? {
+        guard let profile = resolveProfile(deviceName: deviceName)?.panel(panel) else {
             return nil
         }
         let chromeID = profile.chromeIdentifier
@@ -69,7 +77,7 @@ final class LiveChromes: Chromes, @unchecked Sendable {
 
     private func loadAssets(
         chromeIdentifier: String,
-        profile: DeviceProfile
+        profile: DeviceProfile.PanelProfile
     ) -> DeviceChromeAssets? {
         let chrome: DeviceChrome
         do {
@@ -109,7 +117,7 @@ final class LiveChromes: Chromes, @unchecked Sendable {
     private func loadComposite(
         chromeIdentifier: String,
         chrome: DeviceChrome,
-        profile: DeviceProfile
+        profile: DeviceProfile.PanelProfile
     ) -> ChromeImage? {
         if let imageName = chrome.compositeImageName,
            let pdf = try? store.chromeAssetPDF(

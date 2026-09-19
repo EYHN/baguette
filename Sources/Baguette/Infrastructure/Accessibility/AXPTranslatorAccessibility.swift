@@ -50,9 +50,21 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
     /// hung simulator doesn't pin our caller.
     private static let xpcTimeoutSeconds: Double = 5.0
 
-    init(udid: String, host: any DeviceHost) {
+    /// `litPanelPointSize` answers the point space of the panel the
+    /// phone plane is bound to, when the device has more than one;
+    /// `nil` for every single-panel device, which then uses the device
+    /// type's `mainScreenSize` as it always has. Pluggable so tests can
+    /// drive the transform without a display resolve.
+    private let litPanelPointSize: @Sendable () -> CGSize?
+
+    init(
+        udid: String,
+        host: any DeviceHost,
+        litPanelPointSize: @escaping @Sendable () -> CGSize? = { nil }
+    ) {
         self.udid = udid
         self.host = host
+        self.litPanelPointSize = litPanelPointSize
     }
 
     private func resolveDevice() -> NSObject? {
@@ -147,7 +159,9 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
             log("[ax] no mac platform element from translation")
             return nil
         }
-        let pointSize = Self.devicePointSize(for: device)
+        // A foldable's AX space is the lit panel's, which the hinge
+        // moves; every other device's is its one screen.
+        let pointSize = litPanelPointSize() ?? Self.devicePointSize(for: device)
         let rootFrame = AXElementReader.frame(of: frontmostRoot)
         let transform = AXFrameTransform(rootFrame: rootFrame, pointSize: pointSize)
 

@@ -74,6 +74,14 @@ struct ChromeTarget: ParsableArguments {
     @Option(name: .long, help: "Custom device set path (with --udid)")
     var deviceSet: String?
 
+    /// Which of a foldable's panels to describe. Left out, a `--udid`
+    /// target follows the hinge (the lit panel) and a `--device-name`
+    /// target is the cover. Naming one reads that panel's chrome
+    /// regardless of pose — the way to get the open layout for a
+    /// device that is folded right now.
+    @Option(name: .long, help: "Panel of a foldable: cover | unfolded (default: the lit one)")
+    var panel: IntegratedPanel?
+
     /// Shown in error messages — whichever target the user supplied.
     var label: String {
         if let udid { return "udid \(udid)" }
@@ -83,16 +91,30 @@ struct ChromeTarget: ParsableArguments {
 
     func resolveAssets(in chromes: any Chromes) throws -> DeviceChromeAssets? {
         if let deviceName {
-            return chromes.assets(forDeviceName: deviceName)
+            guard let panel else { return chromes.assets(forDeviceName: deviceName) }
+            return chromes.assets(forDeviceName: deviceName, panel: panel)
         }
         if let udid {
             let simulators = CoreSimulators(deviceSetPath: deviceSet)
             guard let sim = simulators.find(udid: udid) else {
                 throw ChromeCommandError.simulatorNotFound(udid: udid)
             }
-            return sim.chrome(in: chromes)
+            guard let panel else { return sim.chrome(in: chromes) }
+            return chromes.assets(forDeviceName: sim.deviceTypeName, panel: panel)
         }
         throw ChromeCommandError.missingTarget
+    }
+}
+
+/// CLI spelling of a foldable's panels: `cover` is the primary, `unfolded`
+/// the secondary. Parsed at the App layer only.
+extension IntegratedPanel: ExpressibleByArgument {
+    public init?(argument: String) {
+        switch argument.lowercased() {
+        case "cover", "primary": self = .primary
+        case "unfolded", "secondary": self = .secondary
+        default: return nil
+        }
     }
 }
 

@@ -8,6 +8,34 @@ struct DisplayBinding: Sendable, Equatable {
     let connectedScreenId: UInt32
     let portName: String
     let size: Size
+    /// The guest's interface orientation on the bound screen, when it
+    /// reported one. See `ConnectedScreenRecord.uiOrientation`.
+    let orientation: DeviceOrientation?
+
+    init(
+        kind: DisplayKind,
+        connectedScreenId: UInt32,
+        portName: String,
+        size: Size,
+        orientation: DeviceOrientation? = nil
+    ) {
+        self.kind = kind
+        self.connectedScreenId = connectedScreenId
+        self.portName = portName
+        self.size = size
+        self.orientation = orientation
+    }
+
+    /// The panel's size in points, given the device's screen scale.
+    ///
+    /// Accessibility frames live in this space. On a foldable the lit
+    /// panel — and so the space — follows the hinge, which is why the
+    /// size comes from the binding rather than the device type's single
+    /// `mainScreenSize`.
+    func pointSize(scale: Double) -> Size? {
+        guard scale > 0 else { return nil }
+        return Size(width: size.width / scale, height: size.height / scale)
+    }
 }
 
 /// Point-in-time port facts lifted from SimulatorKit for pure selection.
@@ -15,21 +43,24 @@ struct FramebufferPortSnapshot: Sendable, Equatable {
     let portName: String
     let connectedScreenId: UInt32?
     let size: Size
-    /// The port joined to the Connected Screen CoreSimulator names
-    /// `primary` — the device's own panel. See
-    /// `ConnectedScreenRecord.isPrimaryPanel`.
-    let isPrimaryPanel: Bool
+    /// Which of the device's own panels the joined Connected Screen is,
+    /// when it is one. See `ConnectedScreenRecord.panel`.
+    let panel: IntegratedPanel?
+    /// The joined screen's interface orientation, when reported.
+    let orientation: DeviceOrientation?
 
     init(
         portName: String,
         connectedScreenId: UInt32?,
         size: Size,
-        isPrimaryPanel: Bool = false
+        panel: IntegratedPanel? = nil,
+        orientation: DeviceOrientation? = nil
     ) {
         self.portName = portName
         self.connectedScreenId = connectedScreenId
         self.size = size
-        self.isPrimaryPanel = isPrimaryPanel
+        self.panel = panel
+        self.orientation = orientation
     }
 
     var area: Double { size.width * size.height }

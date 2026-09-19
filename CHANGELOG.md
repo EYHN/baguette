@@ -23,11 +23,18 @@ For releases prior to this changelog, see the
   `primary` and, on a multi-panel device only, addresses that panel's
   own `0x40000000 | screenId` registration (`0x40000001` — the number
   the CarPlay work had filed as a near-miss). Single-panel devices take
-  the same path they always did, with no new guest round-trip; the Duo
-  pays one `simctl io enumerate` (~130 ms) per bind. `chrome layout`,
-  `describe-ui` and the 9-slice bezel size all report the cover.
-  Nothing in this beta unfolds the device — see
-  `docs/features/iphone-duo.md`.
+  the same path they always did, with no new guest round-trip.
+- **baguette follows the Duo's hinge.** Device Hub's pose picker folds
+  and unfolds the device; baguette reads the angle back through
+  `devicectl device motion hinge-angle` (~0.3 s, foldables only) and
+  binds the lit panel for everything: stream, screenshot, taps (the
+  unfolded panel's own digitizer, `0x40000003`), `chrome layout` and
+  the bezel (`phone14`, 669×951 when open), `describe-ui` point space.
+  `GET /simulators/<udid>/hinge` reports `angleDegrees`, `litPanel` and
+  the guest's `orientation`; the page polls it and re-bootstraps when
+  the pose changes, taking the guest's landscape rather than forcing
+  portrait. `chrome layout --panel cover|unfolded` reads either panel's
+  layout by name. See `docs/features/iphone-duo.md`.
 
 ---
 

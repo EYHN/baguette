@@ -59,26 +59,44 @@ the 7680×4320 `scene` port. Both chrome bundles ship a baked
 ## What baguette does
 
 Every phone-plane entry point (`tap` / `swipe` / `input`, `screenshot`,
-`stream`, `serve`, `record`) now goes through the phone `Display`
-rather than an unbound screen and a fixed-target input.
+`stream`, `serve`, `record`, `describe-ui`, `chrome layout`) follows
+the **lit** panel. Which one that is comes from the hinge.
 
-### Framebuffer: the `primary` panel, not the largest
+### The hinge is read, not driven
 
-`ConnectedScreens.binding(kind: .phone)` used to take the largest
-portrait port. On the Duo that is the unfolded panel, which is black,
-so `baguette screenshot` returned 2007×2853 of nothing. Connected
-Screens carries a `Device Name:` per screen, and CoreSimulator names
-the device's own panel `primary` and a foldable's second `primary-1`.
-The parser now keeps that name, the port snapshot carries the mark
-across the size-join, and a marked port wins outright. Devices and
-enumerate output without the name fall through to the shape rule
-unchanged.
+Device Hub folds and unfolds the Duo from the pose picker at the bottom
+of its window. It streams the angle into the guest as HID reports
+(`UniversalHID` → `dtuhidd` → `kIOHIDEventTypeHingeAngle` → CoreMotion
+→ SpringBoard's pose provider), and SpringBoard decides which panel to
+light. baguette reads that angle back with
 
-`DeviceProfile` reads the same fact from `capabilities.plist` — among
-the `integrated` entries it prefers `deviceName == "primary"` — so a
-9-slice bezel would size to the cover, not the inner panel.
+```bash
+xcrun devicectl device motion hinge-angle --device <UDID> --timeout 5
+```
 
-### Digitizer: the panel's own registration, not the shared slot
+whose first sample is the current angle and lands in ~0.3 s;
+`DevicectlHinge` takes it and terminates the monitor. `HingeAngle.
+litPanel` puts the swap at 90°: Device Hub's closed pose reads ≈3°,
+its open pose ≈130°. Only a device with more than one portrait panel
+(`IntegratedPanels.several`) ever asks — a phone pays nothing.
+
+`GET /simulators/<udid>/hinge` reports it:
+
+```json
+{"ok":true,"foldable":true,"angleDegrees":130.0,"litPanel":"secondary","orientation":"landscape-left"}
+```
+
+### Framebuffer: the lit panel
+
+`ConnectedScreens.binding(kind: .phone, litPanel:)` binds the port
+whose Connected Screen CoreSimulator names `primary` (cover) or
+`primary-1` (unfolded) according to the hinge; a device with only a
+primary gets it whatever the hinge says, and output without names falls
+through to the shape rule unchanged. The binding also carries the
+screen's `UI Orientation`, because the open pose puts SpringBoard in
+landscape by itself.
+
+### Digitizer: the lit panel's own registration, not the shared slot
 
 This is the one that needed the disassembler. In
 `SimulatorHID` (shipped with CoreSimulator, loaded into every
@@ -96,33 +114,49 @@ does three things:
 So `0x32` was never a digitizer of its own. It is a **slot**, owned by
 the last built-in panel created. Every single-panel device creates one
 built-in panel and the slot is it. The Duo creates two — screen 1, then
-screen 3 — both built-in, and the slot ends on screen 3: the dark one.
-backboardd confirms it: a tap sent to `0x32` arrives on
-`ACEFADE00000009`, the sender bound to LCD-1's display UUID, and
-nothing on the cover reacts.
+screen 3 — both built-in, and the slot ends on screen 3. backboardd
+confirms it: a tap sent to `0x32` arrives on `ACEFADE00000009`, the
+sender bound to LCD-1's display UUID.
 
-The cover panel's own key is `0x40000001` — the `1073741825` that has
-sat in the guest's published known-targets list all along
-(`(50, 13, 11, 53, 51, 302, 300, 1, 14, 60, 12, 100, 54, 1073741825, 301)`).
-[`companion-screens.md`](companion-screens.md) read that number as a
-near-miss "registered by something else"; the something else is
-step 2 above for screen 1. A tap sent there lands on `ACEFADE00000007`
-and opens Settings.
-
-`DisplayTouchTarget.resolve(kind: .phone, connectedScreenId:)` now
-returns `IndigoHIDTouchTarget.panel(screenId:)` when a panel is bound
-and the slot when none is. `SimulatorKitDisplay.input()` only binds one
-when `IntegratedPanels.several(in:)` says the in-process port walk
-found more than one portrait panel — so a one-shot tap on any
-single-panel device is exactly what it was (`0x32`, no guest
-round-trip, ~230 ms), and on the Duo it pays one `simctl io enumerate`
-(~130 ms → ~380 ms) to learn that the lit panel is screen 1.
+The panels' own keys are `0x40000001` (cover) and `0x40000003`
+(unfolded); the former is the `1073741825` that has sat in the guest's
+published known-targets list all along, which
+[`companion-screens.md`](companion-screens.md) had read as a near-miss.
+`DisplayTouchTarget.resolve(kind: .phone, connectedScreenId:)` returns
+`IndigoHIDTouchTarget.panel(screenId:)` for the bound (lit) panel and
+the slot when none is bound.
 
 The rule from the CarPlay work stands, sharpened: **a target is a
 registration.** `panel(screenId:)` is only ever fed a screen id that
 Connected Screens lists as `Integrated`, because only those get a
 create-digitizer message. Screen 2 is TVOut; `0x40000002` is still the
 number that takes the guest down.
+
+### Chrome, tap space and accessibility
+
+`DeviceProfile` reads both panels from `capabilities.plist`: the cover
+is the profile's own `phone15` / 466×678, the unfolded panel is
+`primary-1`'s `phone14` / 669×951. `Chromes.assets(forDeviceName:panel:)`
+serves either, and `Simulator.chrome(in:)` picks by `litPanel(in:)`,
+so `chrome.json`, `definition.json`, `bezel.png` and `chrome layout
+--udid` all describe the lit panel. `chrome layout --device-name
+"iPhone Duo" --panel unfolded` reads the open layout by name, for a
+device that is folded or not booted. `describe-ui` frames come back in
+the lit panel's point space (`DisplayBinding.pointSize(scale:)`).
+
+### The page follows
+
+`sim.html` reads `/hinge` once at boot: on a foldable it takes the
+guest's orientation instead of forcing portrait (SpringBoard turns the
+open pose back to landscape the moment the home screen shows), then
+polls every 2 s and reloads when the lit panel or its orientation
+changes — the stream, bezel, tap space and rotation are all bound at
+boot, so a change means starting over. A phone answers `foldable:false`
+once and is never polled again.
+
+Known cosmetic gap: `phone14`'s power button is anchored on the top
+edge and drawn from a wide image, so in the open pose it protrudes as a
+bar where Device Hub shows a nub. Positions match; the art does not.
 
 ## Coordinates
 
@@ -131,48 +165,40 @@ space. `baguette chrome layout --udid <UDID>` reports the cover's
 466 × 678 while folded, and that is what to pass as `--width` /
 `--height`. `describe-ui` frames come back in the same space.
 
+## Driving the hinge from baguette
+
+Not yet. Device Hub speaks to the guest over CoreDevice's `UniversalHID`
+— a Swift-only private framework that creates a virtual HID service
+from a descriptor and streams generic reports (`report type
+identifier 19` on service `0x1000013f5`, 60 Hz sweeps) — which baguette
+cannot call safely.
+
+What was proven to work, and is the shape a control would take: a
+~60-line shim injected into SpringBoard (the process that owns the
+pose) which swizzles `-[CMAngleManager startAngleUpdatesToQueue:handler:]`,
+keeps the handler, and feeds it `CMAngle`s fabricated with
+`initWithAngle:timestamp:continuousTimestamp:` — struct
+`{eventPhase, state, angleDegrees, mechanicalAngleDegrees, progress,
+velocity, angleValid, velocityValid}` (the two ints are in that order,
+the reverse of the ivars), `state < 3`, `eventPhase < 6`. Delivering 0°
+lit the cover and 180° lit the unfolded panel, reversibly; intermediate
+angles obey SpringBoard's own hysteresis and want a velocity sweep. It
+must **forward** to the original handler, or Device Hub's own hinge
+goes dead (that is what made Device Hub look inert during the first
+investigation). The cost is `launchctl setenv DYLD_INSERT_LIBRARIES` in
+the guest launchd plus a SpringBoard restart on first arm, which kills
+running apps. Not shipped: Device Hub already provides the control, and
+baguette following it covers the workflow.
+
 ## What the beta cannot do yet
 
-- **No fold / unfold.** Apple's Duo guidance describes six poses
-  (closed, tent, open landscape, book, open portrait, laptop), but
-  nothing shipped drives them. Host side: `simctl io screenConfig` has
-  only `power` and `geometry` (powering `primary-1` on lights nothing —
-  the guest's pose, not the panel's power, decides what is drawn);
-  `devicectl device motion` can *monitor* a hinge angle on real
-  hardware and `simulate` offers biometrics / location / statusBar;
-  neither Xcode 27.0's nor 27.1 beta's Device Hub has a pose control —
-  DeviceKit ships exactly one Duo asset, `v68_Closed`; UniversalHID /
-  `dtuhidd` carry no hinge event type. So the Duo is a 466 × 678 phone
-  with a dark second panel until Apple wires a control up.
-
-  Where the pose actually lives, for whoever picks this up:
-  - `SBFDevicePoseProvider` (SpringBoardFoundation) owns the pose.
-    Its angle comes from a CoreMotion hinge manager
-    (`_cmAngleManager`; CoreMotion is the guest's consumer of
-    `kIOHIDEventTypeHingeAngle`), and CoreMotion is gated off on the
-    simulator platform — the same hardware-capability bit that makes
-    `motion.md` inject `VirtualMotion.dylib`. The hinge therefore
-    reports `isAvailable = NO` and the pose never leaves *closed*.
-  - It persists `SBFDevicePoseLastKnownCMAngle` in `com.apple.springboard`
-    as `{isAvailable, minAngleDegrees, maxAngleDegrees, angleDegrees,
-    velocityDegreesPerSeconds}` and `SBFDisplayContentModeResolver`
-    reads it at init. Writing `angleDegrees = 180, isAvailable = 1`
-    and restarting SpringBoard was tried: read back fine, no effect —
-    the live manager's unavailability wins.
-  - Two override entry points exist, both inside the guest:
-    `systemServiceServer:client:setDevicePoseOverride:` (a SpringBoard
-    system service) and `setDisplayToolProfileOverride:` behind
-    `SBSDisplayToolService` ("swap display" / "setPrimary" / "hinge
-    replay"), which logs *Insufficient authorization* for unentitled
-    clients. A spike would be: inject into a guest process that holds
-    the entitlement, or inject a CM hinge shim into SpringBoard the way
-    `VirtualMotion` shims apps — `launchctl setenv` in the guest launchd
-    plus a SpringBoard kickstart. Neither is done.
-
-  When a control does land, "lit" will need a host-side signal —
-  `primary` will presumably stop being the answer once the cover turns
-  off — and that is the first thing to re-measure.
-- **The unfolded panel is not a plane of its own.** `--display` still
-  accepts `phone | carplay`. Exposing `primary-1` would today stream a
-  black surface and drive a digitizer for a panel the guest has turned
-  off. It becomes worth adding the day the hinge does.
+- **Only two poses reach the simulator.** Apple's Duo guidance lists
+  six (closed, tent, open landscape, book, open portrait, laptop);
+  Device Hub's picker has three and drives closed (≈3°) and open
+  (≈130°). Nothing on the host sets an arbitrary angle — `simctl io
+  screenConfig` has only `power` and `geometry` (powering `primary-1`
+  on lights nothing; the guest's pose decides), and `devicectl device
+  simulate` offers biometrics / location / statusBar.
+- **`describe-ui` in landscape** maps frames through a portrait point
+  size, as it always has for a rotated iPhone; the open pose is
+  landscape, so expect the same skew there.

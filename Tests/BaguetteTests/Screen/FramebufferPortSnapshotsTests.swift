@@ -44,9 +44,9 @@ struct FramebufferPortSnapshotsTests {
         #expect(snapshots[1].size == Size(width: 800, height: 480))
     }
 
-    /// The port itself has no idea which panel it is; the mark comes
+    /// The port itself has no idea which panel it is; the name comes
     /// from the Connected Screens record it joins to.
-    @Test func `carries the primary-panel mark from the matched screen onto the port`() {
+    @Test func `carries the panel from the matched screen onto the port`() {
         let ports = [
             SizedFramebufferPort(
                 portName: "com.apple.framebuffer.display",
@@ -64,7 +64,8 @@ struct FramebufferPortSnapshotsTests {
             ),
             ConnectedScreenRecord(
                 screenId: 3, name: "LCD-1", screenType: .integrated,
-                size: Size(width: 2007, height: 2853), deviceName: "primary-1"
+                size: Size(width: 2007, height: 2853), deviceName: "primary-1",
+                uiOrientation: .landscapeLeft
             ),
         ]
 
@@ -73,9 +74,11 @@ struct FramebufferPortSnapshotsTests {
         )
 
         #expect(snapshots[0].connectedScreenId == 3)
-        #expect(!snapshots[0].isPrimaryPanel)
+        #expect(snapshots[0].panel == .secondary)
+        #expect(snapshots[0].orientation == .landscapeLeft)
+        #expect(snapshots[1].orientation == nil)
         #expect(snapshots[1].connectedScreenId == 1)
-        #expect(snapshots[1].isPrimaryPanel)
+        #expect(snapshots[1].panel == .primary)
     }
 
     @Test func `a port with no matched screen is not a panel`() {
@@ -86,7 +89,7 @@ struct FramebufferPortSnapshotsTests {
             )],
             screens: []
         )
-        #expect(!snapshots[0].isPrimaryPanel)
+        #expect(snapshots[0].panel == nil)
     }
 
     @Test func `leaves screen id nil when no connected screens remain to match`() {

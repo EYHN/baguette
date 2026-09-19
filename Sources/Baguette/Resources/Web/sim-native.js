@@ -417,13 +417,60 @@
     // Only meaningful once the guest is up: an unbooted device has no
     // PurpleWorkspacePort to send the GSEvent to. `resetToPortrait`
     // runs again after a boot completes.
-    if (isBooted(meta.state)) resetToPortrait();
+    //
+    // Not on an open foldable, though. iPhone Duo's unfolded panel is
+    // landscape by the guest's own choice — SpringBoard turns it back
+    // the moment the home screen shows — so forcing portrait would
+    // leave the page fighting the device. The hinge poll says which
+    // way the lit panel faces, and the page takes that instead.
+    const hinge = deviceMode ? null : await readHinge();
+    if (hinge && hinge.foldable) {
+      if (hinge.orientation && hinge.orientation !== 'portrait') applyOrientation(hinge.orientation);
+    } else if (isBooted(meta.state)) {
+      resetToPortrait();
+    }
 
     // Start watching for network conditioning immediately, before the card
     // has ever been opened. A throttle armed from the CLI in another
     // terminal is exactly the one someone forgets about, and this page is
     // where they will be looking when the app feels slow.
     if (!deviceMode) watchNetworkArmed();
+
+    // A foldable can change which panel is lit under us — Device Hub's
+    // pose picker folds and unfolds iPhone Duo, and nothing on this
+    // page is told. The stream is bound to a panel, the bezel is one
+    // panel's chrome and the tap space is one panel's size, so the
+    // whole page is re-bootstrapped when the lit panel changes.
+    if (!deviceMode) watchHinge();
+  }
+
+  async function readHinge() {
+    try {
+      const res = await fetch(`/simulators/${encodeURIComponent(udid)}/hinge`);
+      return res.ok ? await res.json() : null;
+    } catch (e) { return null; }
+  }
+
+  // Polls `/hinge` on a foldable and reloads the page when the lit
+  // panel or its orientation changes — both are bound at boot (stream,
+  // bezel, tap space, rotation), so a change means starting over. A
+  // single-panel device answers `foldable:false` on the first poll and
+  // is never asked again: the read is a devicectl round-trip on the
+  // server, not something to pay for on a phone.
+  let hingeTimer = null;
+  let hingePose = null;
+  function watchHinge() {
+    if (!udid || hingeTimer) return;
+    const poseOf = (state) => `${state.litPanel}/${state.orientation || 'portrait'}`;
+    const poll = async () => {
+      const state = await readHinge();
+      if (!state) return;
+      if (!state.foldable) { clearInterval(hingeTimer); hingeTimer = null; return; }
+      if (hingePose === null) { hingePose = poseOf(state); return; }
+      if (poseOf(state) !== hingePose) location.reload();
+    };
+    poll();
+    hingeTimer = setInterval(poll, 2000);
   }
 
   function resetToPortrait() {

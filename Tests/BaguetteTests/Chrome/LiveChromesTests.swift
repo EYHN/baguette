@@ -21,6 +21,63 @@ struct LiveChromesTests {
         return store
     }
 
+    // MARK: - panels
+
+    /// iPhone Duo's `capabilities.plist`: the cover is `phone15`, the
+    /// unfolded panel `phone14`. Asking for the secondary panel reads
+    /// the unfolded panel's chrome bundle.
+    private static let foldableCapabilities: Data = {
+        let plist: [String: Any] = ["capabilities": ["displays": [
+            ["displayType": "integrated", "deviceName": "primary",
+             "chromeIdentifier": "com.apple.dt.devicekit.chrome.phone15",
+             "width": 1398, "height": 2034, "scale": 3],
+            ["displayType": "integrated", "deviceName": "primary-1",
+             "chromeIdentifier": "com.apple.dt.devicekit.chrome.phone14",
+             "width": 2007, "height": 2853, "scale": 3],
+        ]]]
+        return try! PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+    }()
+
+    @Test func `a foldable's secondary panel is the unfolded panel's chrome`() throws {
+        let store = MockChromeStore()
+        let rasterizer = MockPDFRasterizer()
+        let pdf = Data("PDF-14".utf8)
+        let png = ChromeImage(data: Data("PNG-14".utf8), size: Size(width: 700, height: 1000))
+        given(store).profilePlistData(deviceName: .value("iPhone Duo"))
+            .willReturn(Self.makePlist(chromeIdentifier: "com.apple.dt.devicekit.chrome.phone15"))
+        given(store).capabilitiesPlistData(deviceName: .value("iPhone Duo"))
+            .willReturn(Self.foldableCapabilities)
+        given(store).chromeJSONData(chromeIdentifier: .value("phone14"))
+            .willReturn(Data(String(decoding: Self.fixtureChromeJSON, as: UTF8.self)
+                .replacingOccurrences(of: "phone11", with: "phone14").utf8))
+        given(store).chromeAssetPDF(chromeIdentifier: .value("phone14"), imageName: .value("PhoneComposite"))
+            .willReturn(pdf)
+        given(rasterizer).rasterize(pdfData: .value(pdf)).willReturn(png)
+
+        let chromes = LiveChromes(store: store, rasterizer: rasterizer)
+
+        #expect(chromes.panels(forDeviceName: "iPhone Duo") == [.primary, .secondary])
+        let assets = chromes.assets(forDeviceName: "iPhone Duo", panel: .secondary)
+        #expect(assets?.chrome.identifier == "phone14")
+        #expect(assets?.composite == png)
+    }
+
+    @Test func `a single-panel device has no secondary panel`() {
+        let store = makeChromeStore()
+        given(store).profilePlistData(deviceName: .any).willReturn(Self.fixturePlist)
+        let chromes = LiveChromes(store: store, rasterizer: MockPDFRasterizer())
+
+        #expect(chromes.panels(forDeviceName: "iPhone 17 Pro") == [.primary])
+        #expect(chromes.assets(forDeviceName: "iPhone 17 Pro", panel: .secondary) == nil)
+    }
+
+    @Test func `an unknown device has no panels`() {
+        let store = makeChromeStore()
+        given(store).profilePlistData(deviceName: .any).willThrow(StubError.notFound)
+        let chromes = LiveChromes(store: store, rasterizer: MockPDFRasterizer())
+        #expect(chromes.panels(forDeviceName: "Apple TV").isEmpty)
+    }
+
     // MARK: - happy path
 
     @Test func `assets returns parsed chrome and rasterized composite`() throws {

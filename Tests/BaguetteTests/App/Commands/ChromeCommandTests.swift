@@ -61,6 +61,7 @@ struct ChromeCommandTests {
 
     @Test func `resolveAssets routes through chromes when device-name is set`() throws {
         let chromes = MockChromes()
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         let assets = DeviceChromeAssets(
             chrome: Self.fixtureChrome,
             composite: ChromeImage(data: Data("PNG".utf8), size: Size(width: 1, height: 1))
@@ -74,8 +75,35 @@ struct ChromeCommandTests {
         verify(chromes).assets(forDeviceName: .value("iPhone 17 Pro")).called(1)
     }
 
+    /// A foldable's unfolded panel has its own chrome; `--panel
+    /// unfolded` asks for it by name instead of through the hinge, so a
+    /// script can read the open pose's layout on a folded (or unbooted)
+    /// device.
+    @Test func `resolveAssets reads the unfolded panel's chrome when --panel unfolded`() throws {
+        let chromes = MockChromes()
+        let assets = DeviceChromeAssets(
+            chrome: Self.fixtureChrome,
+            composite: ChromeImage(data: Data("PNG".utf8), size: Size(width: 1, height: 1))
+        )
+        given(chromes).assets(forDeviceName: .value("iPhone Duo"), panel: .value(.secondary))
+            .willReturn(assets)
+
+        let target = try ChromeTarget.parse(["--device-name", "iPhone Duo", "--panel", "unfolded"])
+        #expect(try target.resolveAssets(in: chromes) == assets)
+    }
+
+    @Test func `--panel accepts cover and unfolded only`() throws {
+        #expect(try ChromeTarget.parse(["--device-name", "x", "--panel", "cover"]).panel == .primary)
+        #expect(try ChromeTarget.parse(["--device-name", "x", "--panel", "unfolded"]).panel == .secondary)
+        #expect(try ChromeTarget.parse(["--device-name", "x"]).panel == nil)
+        #expect(throws: (any Error).self) {
+            try ChromeTarget.parse(["--device-name", "x", "--panel", "inner"])
+        }
+    }
+
     @Test func `resolveAssets returns nil when chromes has no bundle for the device`() throws {
         let chromes = MockChromes()
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         given(chromes).assets(forDeviceName: .any).willReturn(nil)
 
         let target = try ChromeTarget.parse(["--device-name", "Apple TV"])
@@ -84,6 +112,7 @@ struct ChromeCommandTests {
 
     @Test func `resolveAssets throws missingTarget when neither flag is supplied`() throws {
         let chromes = MockChromes()
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         let target = try ChromeTarget.parse([])
 
         #expect(throws: ChromeCommandError.self) {

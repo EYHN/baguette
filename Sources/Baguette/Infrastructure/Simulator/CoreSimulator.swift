@@ -95,7 +95,11 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
     }
 
     func displays() -> any Displays {
-        SimulatorKitDisplays(udid: udid, host: host)
+        SimulatorKitDisplays(udid: udid, host: host, hinge: hinge())
+    }
+
+    func hinge() -> any Hinge {
+        DevicectlHinge(udid: udid)
     }
 
     func externalDisplays() -> any ExternalDisplays {
@@ -103,7 +107,33 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
     }
 
     func accessibility() -> any Accessibility {
-        AXPTranslatorAccessibility(udid: udid, host: host)
+        AXPTranslatorAccessibility(
+            udid: udid, host: host,
+            litPanelPointSize: { [udid, host] in
+                // Only a foldable has a panel to choose; a phone keeps the
+                // device type's `mainScreenSize` and pays no round-trip.
+                guard let sized = try? SimulatorKitFramebufferPorts.sizedPorts(udid: udid, host: host),
+                      IntegratedPanels.several(in: sized),
+                      let binding = try? SimulatorKitDisplays(
+                          udid: udid, host: host, hinge: DevicectlHinge(udid: udid)
+                      ).phone.resolve(),
+                      let scale = Self.mainScreenScale(udid: udid, host: host),
+                      let size = binding.pointSize(scale: scale)
+                else { return nil }
+                return CGSize(width: size.width, height: size.height)
+            }
+        )
+    }
+
+    /// `deviceType.mainScreenScale` — the same number for every panel
+    /// of a device (iPhone Duo is @3x on both).
+    private static func mainScreenScale(udid: String, host: any DeviceHost) -> Double? {
+        guard let device = host.resolveDevice(udid: udid),
+              let deviceType = device.value(forKey: "deviceType") as? NSObject,
+              let scale = (deviceType.value(forKey: "mainScreenScale") as? NSNumber)?.doubleValue,
+              scale > 0
+        else { return nil }
+        return scale
     }
 
     func logs() -> any LogStream {

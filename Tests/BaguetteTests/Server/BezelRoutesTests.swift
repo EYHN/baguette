@@ -115,6 +115,7 @@ struct BezelRoutesTests {
 
     @Test func `bezelImage returns nil for an unknown udid`() {
         let chromes = MockChromes()
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         let sims = MockSimulators()
         given(sims).find(udid: .value("ghost")).willReturn(nil)
 
@@ -173,6 +174,7 @@ struct BezelRoutesTests {
         let sims = MockSimulators()
         given(sims).find(udid: .value("ghost")).willReturn(nil)
         let chromes = MockChromes()
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         #expect(Server.definitionJSONString(
             udid: "ghost", simulators: sims, chromes: chromes
         ) == nil)
@@ -267,6 +269,8 @@ private extension BezelRoutesTests {
         )
 
         let chromes = MockChromes()
+
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         given(chromes).assets(forDeviceName: .any).willReturn(assets)
 
         let sim = MockSimulator()

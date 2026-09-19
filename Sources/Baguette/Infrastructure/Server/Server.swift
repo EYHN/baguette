@@ -539,6 +539,20 @@ struct Server: Sendable {
                             body: .init(byteBuffer: ByteBuffer(string: json)))
         }
 
+        // Hinge — a foldable's pose. The page polls this on iPhone Duo so
+        // that when Device Hub folds or unfolds the device, the stream,
+        // the bezel and the tap space follow the newly lit panel; every
+        // other device answers `foldable:false` once and is never asked
+        // again.
+        router.get("/simulators/:udid/hinge") { [simulators, chromes] r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            guard let json = Self.hingeJSON(
+                udid: Self.udidParam(r), simulators: simulators, chromes: chromes
+            ) else {
+                return errorJSON("unknown udid: \(Self.udidParam(r))", status: .notFound)
+            }
+            return Self.jsonResponse(json)
+        }
         // Chrome / bezel — DeviceKit-sourced layout + rasterized PNG.
         router.get("/simulators/:udid/chrome.json") { [simulators, chromes] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
@@ -1474,6 +1488,30 @@ struct Server: Sendable {
     /// Reporting an unknown device as one with no conditioning would read
     /// as reassurance about a simulator that doesn't exist, which is the
     /// wrong answer to give a badge whose whole job is being believed.
+    /// Pure data producer for `GET /simulators/<udid>/hinge`.
+    ///
+    /// `foldable` comes from the profile (does the device have a second
+    /// panel), `angleDegrees` from the hinge — `null` when no reading
+    /// arrived, which on a foldable means "as booted" — and `litPanel`
+    /// is the one the chrome, screen and tap space currently describe.
+    /// A single-panel device's hinge is never consulted.
+    static func hingeJSON(
+        udid: String, simulators: any Simulators, chromes: any Chromes
+    ) -> String? {
+        guard !udid.isEmpty, let sim = simulators.find(udid: udid) else { return nil }
+        let foldable = chromes.panels(forDeviceName: sim.deviceTypeName).contains(.secondary)
+        let angle = foldable ? sim.hinge().angle() : nil
+        let degrees = angle.map { "\($0.degrees)" } ?? "null"
+        let lit = angle?.litPanel ?? .primary
+        // The guest turns the unfolded panel to landscape on its own, so
+        // the page has to be told which way it faces; the binding of the
+        // phone plane carries what Connected Screens reports.
+        let orientation = (foldable ? try? sim.displays().phone.resolve() : nil)?
+            .orientation.map { "\"\($0.wireName)\"" } ?? "null"
+        return #"{"ok":true,"foldable":\#(foldable),"angleDegrees":\#(degrees),"#
+            + #""litPanel":"\#(lit == .primary ? "primary" : "secondary")","orientation":\#(orientation)}"#
+    }
+
     static func networkStateJSON(udid: String, simulators: any Simulators) async -> String? {
         let profiles = NetworkProfile.allCases
             .map { "\"\($0.rawValue)\"" }

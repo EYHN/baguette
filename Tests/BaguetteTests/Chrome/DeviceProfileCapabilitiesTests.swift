@@ -81,11 +81,13 @@ struct DeviceProfileCapabilitiesTests {
         let cover: [String: Any] = [
             "displayType": "integrated", "deviceName": "primary",
             "displayName": "LCD",
+            "chromeIdentifier": "com.apple.dt.devicekit.chrome.phone15",
             "width": 1398, "height": 2034, "scale": 3,
         ]
         let unfolded: [String: Any] = [
             "displayType": "integrated", "deviceName": "primary-1",
             "displayName": "LCD-1",
+            "chromeIdentifier": "com.apple.dt.devicekit.chrome.phone14",
             "width": 2007, "height": 2853, "scale": 3,
         ]
         let plist: [String: Any] = [
@@ -107,6 +109,32 @@ struct DeviceProfileCapabilitiesTests {
             // 1398x2034 @3 — the cover, which is what the guest lights.
             #expect(profile.screenSize == Size(width: 466, height: 678))
         }
+    }
+
+    /// Each panel has its own DeviceKit chrome and its own size; the
+    /// unfolded panel is what the bezel and the tap space become once
+    /// the hinge opens.
+    @Test func `a foldable's profile carries the unfolded panel's chrome and size`() throws {
+        let profile = try DeviceProfile.parsing(
+            plistData: modernProfile(),
+            capabilitiesData: foldableCapabilities(unfoldedFirst: false)
+        )
+        let unfolded = try #require(profile.panel(.secondary))
+        #expect(unfolded.chromeIdentifier == "phone14")
+        #expect(unfolded.screenSize == Size(width: 669, height: 951))
+        let cover = try #require(profile.panel(.primary))
+        #expect(cover.chromeIdentifier == "tablet5")   // the profile's own id wins for the primary
+        #expect(cover.screenSize == Size(width: 466, height: 678))
+        #expect(profile.panels == [.primary, .secondary])
+    }
+
+    @Test func `a single-panel device has no secondary panel`() throws {
+        let profile = try DeviceProfile.parsing(
+            plistData: modernProfile(), capabilitiesData: capabilities()
+        )
+        #expect(profile.panel(.secondary) == nil)
+        #expect(profile.panels == [.primary])
+        #expect(profile.panel(.primary)?.screenSize == Size(width: 834, height: 1210))
     }
 
     @Test func `reads the screen size from the profile on Xcode 26`() throws {

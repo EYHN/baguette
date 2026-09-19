@@ -25,6 +25,18 @@ protocol Chromes: AnyObject, Sendable {
     /// load. The caller decides whether to fall back to a plain
     /// stream.
     func assets(forDeviceName deviceName: String) -> DeviceChromeAssets?
+
+    /// The chrome for one of the device's own panels. The primary is
+    /// what `assets(forDeviceName:)` returns; the secondary exists only
+    /// on a foldable — iPhone Duo's unfolded panel has its own DeviceKit
+    /// chrome (`phone14`) and its own screen size — and is `nil` on
+    /// every other device.
+    func assets(forDeviceName deviceName: String, panel: IntegratedPanel) -> DeviceChromeAssets?
+
+    /// Which panels the device has: `[.primary]` for everything but a
+    /// foldable, `[.primary, .secondary]` for one, empty when no chrome
+    /// bundle covers the device at all.
+    func panels(forDeviceName deviceName: String) -> [IntegratedPanel]
 }
 
 /// What `Chromes` hands back: the parsed layout from `chrome.json`

@@ -9,27 +9,37 @@ enum ConnectedScreens {
     /// Runtime IOSurface dims win when areas differ.
     static let carPlayPlistSize = Size(width: 720, height: 480)
 
+    /// `litPanel` is which of a foldable's panels the hinge has lit —
+    /// `HingeAngle.litPanel`. Defaults to the cover, which is how every
+    /// device boots and the only panel a single-panel device has.
     static func binding(
         kind: DisplayKind,
-        ports: [FramebufferPortSnapshot]
+        ports: [FramebufferPortSnapshot],
+        litPanel: IntegratedPanel = .primary
     ) throws -> DisplayBinding {
         switch kind {
         case .phone:
-            return try bindPhone(ports: ports)
+            return try bindPhone(ports: ports, litPanel: litPanel)
         case .carPlay:
-            return try bindCarPlay(ports: ports)
+            return try bindCarPlay(ports: ports, litPanel: litPanel)
         }
     }
 
-    private static func bindPhone(ports: [FramebufferPortSnapshot]) throws -> DisplayBinding {
-        guard let winner = devicePort(in: ports) else {
+    private static func bindPhone(
+        ports: [FramebufferPortSnapshot],
+        litPanel: IntegratedPanel
+    ) throws -> DisplayBinding {
+        guard let winner = devicePort(in: ports, litPanel: litPanel) else {
             throw FramebufferSelectionError.noMatchingPort(.phone)
         }
         return try makeBinding(kind: .phone, port: winner)
     }
 
-    private static func bindCarPlay(ports: [FramebufferPortSnapshot]) throws -> DisplayBinding {
-        guard let device = devicePort(in: ports) else {
+    private static func bindCarPlay(
+        ports: [FramebufferPortSnapshot],
+        litPanel: IntegratedPanel
+    ) throws -> DisplayBinding {
+        guard let device = devicePort(in: ports, litPanel: litPanel) else {
             throw FramebufferSelectionError.noMatchingPort(.carPlay)
         }
         let externals = ports.filter {
@@ -58,15 +68,19 @@ enum ConnectedScreens {
     /// still the best answer available.
     ///
     /// A foldable breaks shape too: iPhone Duo has two portrait
-    /// Integrated panels, and the larger one is the *unfolded* panel the
-    /// guest keeps dark while folded. Largest-portrait bound a black
-    /// surface. When Connected Screens marks a `primary` panel, that is
-    /// the device and shape is not consulted.
+    /// Integrated panels, and which one is drawn to follows the hinge —
+    /// the cover while folded, the larger unfolded panel once open.
+    /// Largest-portrait bound the dark one. When Connected Screens names
+    /// the panels, the lit one is the device; a device with only a
+    /// primary gets its primary whatever the hinge says; shape is
+    /// consulted only when nothing is named.
     private static func devicePort(
-        in ports: [FramebufferPortSnapshot]
+        in ports: [FramebufferPortSnapshot],
+        litPanel: IntegratedPanel
     ) -> FramebufferPortSnapshot? {
-        if let primary = ports.first(where: \.isPrimaryPanel) {
-            return primary
+        if let lit = ports.first(where: { $0.panel == litPanel })
+            ?? ports.first(where: { $0.panel == .primary }) {
+            return lit
         }
         let portrait = ports.filter { $0.size.height > $0.size.width }
         let pool = portrait.isEmpty ? ports : portrait
@@ -99,7 +113,8 @@ enum ConnectedScreens {
             kind: kind,
             connectedScreenId: screenId,
             portName: port.portName,
-            size: port.size
+            size: port.size,
+            orientation: port.orientation
         )
     }
 }

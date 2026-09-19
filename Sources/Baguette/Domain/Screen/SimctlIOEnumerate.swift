@@ -18,19 +18,25 @@ struct ConnectedScreenRecord: Sendable, Equatable {
     /// `external-0`, `wireless0`, `resizable`. Empty when the output
     /// predates the `Device Name:` line.
     let deviceName: String
+    /// The guest's interface orientation on this screen, when it
+    /// reports one. A foldable turns its unfolded panel to landscape by
+    /// itself, and this is the only host-side word of it.
+    let uiOrientation: DeviceOrientation?
 
     init(
         screenId: UInt32,
         name: String,
         screenType: ScreenType,
         size: Size,
-        deviceName: String = ""
+        deviceName: String = "",
+        uiOrientation: DeviceOrientation? = nil
     ) {
         self.screenId = screenId
         self.name = name
         self.screenType = screenType
         self.size = size
         self.deviceName = deviceName
+        self.uiOrientation = uiOrientation
     }
 
     var isExternal: Bool {
@@ -40,15 +46,17 @@ struct ConnectedScreenRecord: Sendable, Equatable {
         }
     }
 
-    /// Whether this is the device's own panel.
+    /// Which of the device's own panels this screen is, if it is one.
     ///
     /// One Integrated screen used to mean one panel. A foldable (iPhone
     /// Duo, iOS 27.1) lists two — the cover as `primary` and the larger
-    /// unfolded panel as `primary-1` — and the guest keeps the second
-    /// dark while folded, so "largest integrated" would bind a black
-    /// surface. The name settles it.
-    var isPrimaryPanel: Bool {
-        screenType == .integrated && deviceName == "primary"
+    /// unfolded panel as `primary-1` — and the guest lights one of them
+    /// according to the hinge, so "largest integrated" would bind a
+    /// black surface half the time. The name says which panel this is;
+    /// `HingeAngle.litPanel` says which one to bind.
+    var panel: IntegratedPanel? {
+        guard screenType == .integrated else { return nil }
+        return IntegratedPanel.named(deviceName)
     }
 }
 
@@ -76,15 +84,36 @@ enum SimctlIOEnumerate {
             let screenType = ConnectedScreenRecord.ScreenType(rawValue: typeRaw) ?? .unknown
             let size = pixelSize(in: body) ?? Size(width: 0, height: 0)
             let deviceName = field(String.self, named: "Device Name", in: body) ?? ""
+            let uiOrientation = field(String.self, named: "UI Orientation", in: body)
+                .flatMap(orientation(named:))
             records.append(ConnectedScreenRecord(
                 screenId: screenId,
                 name: name,
                 screenType: screenType,
                 size: size,
-                deviceName: deviceName
+                deviceName: deviceName,
+                uiOrientation: uiOrientation
             ))
         }
         return records
+    }
+
+    /// The guest's spelling → baguette's device orientation.
+    ///
+    /// Measured rather than assumed, because UIKit's interface and
+    /// device orientations name opposite rotations: a panel the guest
+    /// reports as "Landscape Left" holds its status bar along the left
+    /// edge of the portrait framebuffer, and reads upright after the
+    /// page's `landscape-left` turn (90° clockwise). "Ambiguous" is what
+    /// externals and dark panels report, and is no orientation.
+    static func orientation(named name: String) -> DeviceOrientation? {
+        switch name.trimmingCharacters(in: .whitespaces) {
+        case "Portrait": return .portrait
+        case "Portrait Upside Down": return .portraitUpsideDown
+        case "Landscape Left": return .landscapeLeft
+        case "Landscape Right": return .landscapeRight
+        default: return nil
+        }
     }
 
     private static func connectedScreensSection(in output: String) -> String? {

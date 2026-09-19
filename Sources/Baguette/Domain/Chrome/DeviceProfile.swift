@@ -21,6 +21,31 @@ struct DeviceProfile: Equatable, Sendable {
     /// types carry them on 26, 0 of 124 on 27) and publishes the same
     /// values in a sibling `capabilities.plist` instead.
     let screenSize: Size?
+    /// A foldable's second panel, from `capabilities.plist`'s
+    /// `primary-1` display. `nil` on every single-panel device.
+    let secondaryPanel: PanelProfile?
+
+    /// One of the device's own panels: its DeviceKit chrome and its
+    /// screen in points. The primary is the profile itself; the
+    /// secondary exists only on a foldable, where the hinge decides
+    /// which of the two the bezel and the tap space describe.
+    struct PanelProfile: Equatable, Sendable {
+        let chromeIdentifier: String
+        let screenSize: Size?
+    }
+
+    var panels: [IntegratedPanel] {
+        secondaryPanel == nil ? [.primary] : [.primary, .secondary]
+    }
+
+    func panel(_ panel: IntegratedPanel) -> PanelProfile? {
+        switch panel {
+        case .primary:
+            return PanelProfile(chromeIdentifier: chromeIdentifier, screenSize: screenSize)
+        case .secondary:
+            return secondaryPanel
+        }
+    }
 
     static func parsing(
         plistData data: Data,
@@ -41,32 +66,43 @@ struct DeviceProfile: Equatable, Sendable {
             throw DeviceProfileParseError.missingChromeIdentifier
         }
 
-        let prefix = "com.apple.dt.devicekit.chrome."
-        let bare = fullID.hasPrefix(prefix)
-            ? String(fullID.dropFirst(prefix.count))
-            : fullID
+        let displays = capabilitiesData.flatMap(integratedDisplays) ?? []
+        let cover = displays.first { $0["deviceName"] as? String == "primary" } ?? displays.first
+        let unfolded = displays.first { $0["deviceName"] as? String == "primary-1" }
 
         return DeviceProfile(
-            chromeIdentifier: bare,
-            screenSize: parseScreenSize(dict)
-                ?? capabilitiesData.flatMap(parseIntegratedDisplay)
+            chromeIdentifier: bareChromeIdentifier(fullID),
+            screenSize: parseScreenSize(dict) ?? cover.flatMap(parseDisplaySize),
+            secondaryPanel: unfolded.flatMap { panel in
+                guard let id = panel["chromeIdentifier"] as? String else { return nil }
+                return PanelProfile(
+                    chromeIdentifier: bareChromeIdentifier(id),
+                    screenSize: parseDisplaySize(panel)
+                )
+            }
         )
     }
 
+    private static func bareChromeIdentifier(_ fullID: String) -> String {
+        let prefix = "com.apple.dt.devicekit.chrome."
+        return fullID.hasPrefix(prefix) ? String(fullID.dropFirst(prefix.count)) : fullID
+    }
+
     /// Xcode 27's `capabilities.plist` → `capabilities.displays`, a list
-    /// describing every panel the device can drive. Only an
-    /// `integrated` entry is the device's own screen: the others are
+    /// describing every panel the device can drive. Only the
+    /// `integrated` entries are the device's own screens: the others are
     /// `tvOut` and `carPlay` (both 720×480) and a `scene` entry at
     /// 7680×4320 for resizable windows. Sizing a bezel off any of those
     /// would be silently, wildly wrong, so the type is matched
     /// explicitly rather than taking the first element.
     ///
     /// A foldable lists two `integrated` panels. iPhone Duo's cover is
-    /// `deviceName: primary` (1398×2034) and its unfolded panel is
-    /// `primary-1` (2007×2853); the guest boots folded and lights the
-    /// cover, so `primary` is the screen. Any integrated entry is the
-    /// fallback for the single-panel devices that predate the name.
-    private static func parseIntegratedDisplay(_ data: Data) -> Size? {
+    /// `deviceName: primary` (1398×2034, `phone15`) and its unfolded
+    /// panel is `primary-1` (2007×2853, `phone14`). The cover is the
+    /// profile's own screen; the unfolded one is `secondaryPanel`. Any
+    /// integrated entry is the fallback for the single-panel devices
+    /// that predate the name.
+    private static func integratedDisplays(_ data: Data) -> [[String: Any]]? {
         guard let raw = try? PropertyListSerialization.propertyList(
                   from: data, options: [], format: nil
               ),
@@ -74,13 +110,7 @@ struct DeviceProfile: Equatable, Sendable {
               let capabilities = root["capabilities"] as? [String: Any],
               let displays = capabilities["displays"] as? [[String: Any]]
         else { return nil }
-        let integrated = displays.filter {
-            $0["displayType"] as? String == "integrated"
-        }
-        let panel = integrated.first(where: {
-            $0["deviceName"] as? String == "primary"
-        }) ?? integrated.first
-        return panel.flatMap(parseDisplaySize)
+        return displays.filter { $0["displayType"] as? String == "integrated" }
     }
 
     /// Same arithmetic as `parseScreenSize`, over the capabilities

@@ -6,19 +6,21 @@ final class SimulatorKitDisplays: Displays, @unchecked Sendable {
     let phone: any Display
     let carPlay: any Display
 
-    init(udid: String, host: any DeviceHost) {
+    init(udid: String, host: any DeviceHost, hinge: any Hinge) {
         let enumerateIO = { try SimctlIOCapture.enumerate(udid: udid) }
         self.phone = SimulatorKitDisplay(
             kind: .phone,
             udid: udid,
             host: host,
-            enumerateIO: enumerateIO
+            enumerateIO: enumerateIO,
+            hinge: hinge
         )
         self.carPlay = SimulatorKitDisplay(
             kind: .carPlay,
             udid: udid,
             host: host,
-            enumerateIO: enumerateIO
+            enumerateIO: enumerateIO,
+            hinge: hinge
         )
     }
 }

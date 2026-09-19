@@ -6,6 +6,7 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
     private let udid: String
     private let host: any DeviceHost
     private let enumerateIO: () throws -> String
+    private let hinge: any Hinge
     private let lock = NSLock()
     private var cached: DisplayBinding?
 
@@ -13,14 +14,19 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
         kind: DisplayKind,
         udid: String,
         host: any DeviceHost,
-        enumerateIO: @escaping () throws -> String
+        enumerateIO: @escaping () throws -> String,
+        hinge: any Hinge
     ) {
         self.kind = kind
         self.udid = udid
         self.host = host
         self.enumerateIO = enumerateIO
+        self.hinge = hinge
     }
 
+    /// Binds the plane. On a foldable this also asks the hinge which
+    /// panel is lit (~0.3 s through devicectl); a single-panel device
+    /// never pays that, since it has nothing to choose between.
     func resolve() throws -> DisplayBinding {
         let sized = try SimulatorKitFramebufferPorts.sizedPorts(udid: udid, host: host)
         let screens = SimctlIOEnumerate.connectedScreens(from: try enumerateIO())
@@ -28,7 +34,10 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
             ports: sized,
             screens: screens
         )
-        let binding = try ConnectedScreens.binding(kind: kind, ports: ports)
+        let litPanel: IntegratedPanel = IntegratedPanels.several(in: sized)
+            ? (hinge.angle()?.litPanel ?? .primary)
+            : .primary
+        let binding = try ConnectedScreens.binding(kind: kind, ports: ports, litPanel: litPanel)
         lock.lock()
         cached = binding
         lock.unlock()
@@ -74,11 +83,11 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
     ///
     /// A foldable's panels are all created built-in, and they share the
     /// built-in digitizer slot `0x32` — last one created owns it, which
-    /// on iPhone Duo is the unfolded panel the guest keeps dark. Only
-    /// there is the bound panel's own registration worth the guest
-    /// round-trip (`simctl io enumerate`, ~130 ms). One panel — every
-    /// other device — is answered by the in-process port walk alone and
-    /// keeps the slot, so a one-shot tap pays nothing new.
+    /// on iPhone Duo is the unfolded panel. Only there is the *lit*
+    /// panel's own registration worth the round-trips (`simctl io
+    /// enumerate` ~130 ms, the hinge ~300 ms). One panel — every other
+    /// device — is answered by the in-process port walk alone and keeps
+    /// the slot, so a one-shot tap pays nothing new.
     private func boundPanelScreenId() -> UInt32? {
         guard kind == .phone,
               let sized = try? SimulatorKitFramebufferPorts.sizedPorts(udid: udid, host: host),
