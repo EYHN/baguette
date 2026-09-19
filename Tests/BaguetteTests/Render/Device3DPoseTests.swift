@@ -9,7 +9,17 @@ import Testing
 struct Device3DPoseTests {
     @Test func `parses a pose to fold to`() throws {
         let pose = try #require(try Device3DPose.parsing(json: Data(#"{"type":"set_pose","hingeDegrees":130}"#.utf8)))
-        #expect(pose == .fold(hingeDegrees: 130))
+        #expect(pose == .fold(hingeDegrees: 130, duration: nil))
+    }
+
+    @Test func `a pose may say how long its sweep takes; the hinge slider asks for none`() throws {
+        let picked = try #require(try Device3DPose.parsing(json: Data(#"{"type":"set_pose","hingeDegrees":130}"#.utf8)))
+        #expect(picked == .fold(hingeDegrees: 130, duration: nil))
+        let dragged = try #require(try Device3DPose.parsing(json: Data(#"{"type":"set_pose","hingeDegrees":72.5,"duration":0}"#.utf8)))
+        #expect(dragged == .fold(hingeDegrees: 72.5, duration: 0))
+        #expect(throws: DeviceModelError.invalidRenderOptions) {
+            _ = try Device3DPose.parsing(json: Data(#"{"type":"set_pose","hingeDegrees":90,"duration":-1}"#.utf8))
+        }
     }
 
     @Test func `ignores other envelopes and rejects angles off the hinge`() throws {

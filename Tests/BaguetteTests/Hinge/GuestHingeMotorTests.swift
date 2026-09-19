@@ -15,6 +15,7 @@ struct GuestHingeMotorTests {
         var runs: [[String]] = []
         var executable: URL?
         var written: [String] = []
+        var settled: [TimeInterval] = []
         var onExit: (@Sendable (Int32) -> Void)?
     }
 
@@ -34,7 +35,7 @@ struct GuestHingeMotorTests {
         }
         given(sub).terminate().willReturn()
         let motor = GuestHingeMotor(
-            udid: "duo", subprocess: { sub }, tool: { tool }, settle: { _ in })
+            udid: "duo", subprocess: { sub }, tool: { tool }, settle: { captures.settled.append($0) })
         return (motor, captures)
     }
 
@@ -45,6 +46,16 @@ struct GuestHingeMotorTests {
         #expect(captures.executable?.path == "/usr/bin/xcrun")
         #expect(captures.runs == [["simctl", "spawn", "duo", "/tmp/builds/abc/HingeControl", "serve"]])
         #expect(captures.written == ["sweep 130 0 800\n", "sweep 0 180 500\n"])
+    }
+
+    @Test func `a hardware key is pressed as Device Hub presses it, for as long as asked`() throws {
+        let (motor, captures) = make()
+        try motor.press(HIDUsage(page: 12, usage: 233), hold: 0.25)
+        try motor.press(HIDUsage(page: 0xFF00, usage: 0x66), hold: 1.5)
+        #expect(captures.written == ["button 12 233 250\n", "button 65280 102 1500\n"])
+        // The call outlives the hold, so a one-shot CLI press is not cut
+        // off with the key down. (The first wait is the tool's start.)
+        #expect(captures.settled == [0.15, 0.3, 1.55])
     }
 
     @Test func `turning the guest is written the same way`() throws {

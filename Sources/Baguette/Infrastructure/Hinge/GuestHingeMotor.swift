@@ -1,8 +1,9 @@
 import Foundation
 
-/// `HingeMotor` that keeps `HingeControl serve` running inside the guest
-/// (`xcrun simctl spawn <udid> <HingeControl> serve`) and writes each
-/// sweep to it: `sweep <from> <to> <ms>`, `orientation <name>`.
+/// `HingeMotor` — and `DeviceKeys` — that keeps `HingeControl serve`
+/// running inside the guest (`xcrun simctl spawn <udid> <HingeControl>
+/// serve`) and writes each command to it: `sweep <from> <to> <ms>`,
+/// `orientation <name>`, `button <page> <usage> <ms>`.
 ///
 /// The tool registers a HID service shaped like dtuhidd's `avpCustom`
 /// and dispatches the pose events Device Hub sends (see
@@ -16,7 +17,7 @@ import Foundation
 /// The orchestration — tool lookup, argv, the write, restart after
 /// exit — is unit-covered through `MockSubprocess`; `HostSubprocess`
 /// is integration-only.
-final class GuestHingeMotor: HingeMotor, @unchecked Sendable {
+final class GuestHingeMotor: HingeMotor, DeviceKeys, @unchecked Sendable {
     private let udid: String
     private let subprocess: () -> any Subprocess
     private let tool: () -> String?
@@ -25,6 +26,20 @@ final class GuestHingeMotor: HingeMotor, @unchecked Sendable {
     private let lock = NSLock()
     private var child: (any Subprocess)?
     private var generation = 0
+
+    /// One motor — one serving child — per device, however many
+    /// displays and hinges ask for it.
+    nonisolated(unsafe) private static var registry: [String: GuestHingeMotor] = [:]
+    private static let registryLock = NSLock()
+
+    static func forDevice(_ udid: String) -> GuestHingeMotor {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        if let existing = registry[udid] { return existing }
+        let made = GuestHingeMotor(udid: udid)
+        registry[udid] = made
+        return made
+    }
 
     /// `settle` waits for a sweep to play out (sleeps, in production).
     init(
@@ -44,6 +59,11 @@ final class GuestHingeMotor: HingeMotor, @unchecked Sendable {
     func fold(from: Double, to: Double, over duration: TimeInterval) throws {
         try send("sweep \(Self.number(from)) \(Self.number(to)) \(Self.number(duration * 1000))")
         settle(duration + 0.05)
+    }
+
+    func press(_ usage: HIDUsage, hold: TimeInterval) throws {
+        try send("button \(usage.page) \(usage.usage) \(Self.number(hold * 1000))")
+        settle(hold + 0.05)
     }
 
     func turn(to orientation: DeviceOrientation) throws {

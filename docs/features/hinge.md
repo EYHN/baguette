@@ -77,6 +77,38 @@ any other, so the page, `litPanel` and the chrome all follow.
 route (`HingeMotor.turn(to:)`); the page's rotate button still sends
 the Purple orientation event, which the guest honours or not per app.
 
+## The hardware keys go the same way
+
+On iPhone Duo the legacy button press does not work. `baguette press
+--button volume-up` builds its `IndigoHIDMessageForHIDArbitrary` for
+the lit panel's digitizer target, and the guest *does* get it — a HID
+monitor sees consumer page `0x0C` usage `0xE9` down and up — but on a
+**touchscreen** service (usage page `0x0D` usage `0x04`), and
+SpringBoard's volume, sleep/wake and camera-control handling ignores a
+key from there. Device Hub's buttons arrive on another of `dtuhidd`'s
+services, `mainScreenButtons` (usage page `0x0B` usage `0x01`, built-in,
+transport `CoreDevice`), as plain keyboard `IOHIDEvent`s held a quarter
+second. Measured with the same monitor, one click each in Device Hub:
+
+| Device Hub button | page | usage |
+|---|---|---|
+| volume up | `0x0C` | `0xE9` |
+| volume down | `0x0C` | `0xEA` |
+| power (sleep/wake) | `0x0C` | `0x30` |
+| camera control | `0xFF00` | `0x66` |
+
+`HingeControl` registers a second service of that shape and presses
+them: `button <page> <usage> <ms>`. On the host, `DeviceKeys` is the
+domain role (`GuestHingeMotor` plays it as well, one serving child per
+device), and a foldable's `Input` is `FoldableInput`: touches go to the
+lit panel's digitizer as before, and a `DeviceButton` with a Device Hub
+key (`power`, `lock`, `volume-up`, `volume-down`, `action`) goes to the
+guest, held `duration` seconds or Device Hub's 0.25 s. The CLI, the
+`POST …/input` route and the stream sockets all press through it
+without change; `home` and the edge gestures still take the legacy
+path. Single-panel devices are untouched — `SimulatorKitDisplay` wraps
+the input only when the device has several panels.
+
 ## Packaging
 
 `HingeControl` follows the injected dylibs exactly — `Injected/
