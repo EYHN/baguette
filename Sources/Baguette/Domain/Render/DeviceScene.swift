@@ -12,6 +12,13 @@ protocol DeviceScene: AnyObject, Sendable {
     /// unencoded lets any existing stream codec consume it.
     func render(screen: IOSurface) throws -> IOSurface
 
+    /// A foldable: put each panel's latest frame on its screen and
+    /// return the composed scene, as `render(screen:)` does for a phone.
+    func render(screens: FoldableScreens) throws -> IOSurface
+
+    /// A foldable: pose the book at this hinge angle (`FoldPose`).
+    func update(hingeDegrees: Double)
+
     /// Mutate camera state without reloading the model or reconnecting.
     func update(camera: Device3DCamera)
 

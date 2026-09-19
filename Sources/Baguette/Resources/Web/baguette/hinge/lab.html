@@ -1,0 +1,119 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>hinge lab</title>
+<style>
+  html,body{margin:0;height:100%;background:#f3f4f6;font:12px system-ui}
+  #simNativeView{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  #nativeDeviceFrame > div{transform-origin:center center;max-height:70vh}
+  #nativeDeviceFrame img,#nativeDeviceFrame canvas{max-height:70vh}
+  #hud{position:fixed;left:8px;top:8px;z-index:100;background:rgba(0,0,0,.6);color:#fff;padding:4px 8px;border-radius:6px}
+</style>
+<script src="/baguette/transport.js"></script>
+<script src="/baguette/gestures/gesture-envelope.js"></script>
+<script src="/baguette/gestures/pinch-overlay.js"></script>
+<script src="/baguette/gestures/screen-quad.js"></script>
+<script src="/baguette/gestures/edge-bands.js"></script>
+<script src="/baguette/gestures/attachable-event-source.js"></script>
+<script src="/baguette/gestures/touch-gesture-source.js"></script>
+<script src="/baguette/gestures/wheel-gesture-source.js"></script>
+<script src="/baguette/gestures/safari-gesture-event-source.js"></script>
+<script src="/baguette/gestures/mouse-gesture-source.js"></script>
+<script src="/baguette/gestures/option-hover-preview.js"></script>
+<script src="/baguette/gestures/pointer-interpreter.js"></script>
+<script src="/baguette/parts/bezel.js"></script>
+<script src="/baguette/parts/button.js"></script>
+<script src="/baguette/parts/keyboard.js"></script>
+<script src="/baguette/parts/screen.js"></script>
+<script src="/baguette/simulator.js"></script>
+<script src="/baguette/baguette.js"></script>
+<script src="/baguette/hinge/hinge-sweep.js"></script>
+<script src="/baguette/hinge/fold-view.js"></script>
+</head><body>
+<div id="simNativeView"><div id="nativeDeviceFrame"></div></div>
+<div id="hud">…</div>
+<script>
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const HOST = '';
+  const udid = '5B73AC38-C098-477E-8F0F-73037F7A06F5';
+  const hud = document.getElementById('hud');
+  const frame = document.getElementById('nativeDeviceFrame');
+  const panels = {};
+  let currentLitPanel = 'primary', rotationDegrees = 0, foldView = null, latestAngle = 0;
+  const canonical = { 'portrait': 0, 'landscape-left': 90 };
+  function snapOrientation(v) { rotationDegrees = canonical[v] || 0;
+    for (const w of frame.querySelectorAll(':scope > div')) w.style.transform = 'rotate(' + rotationDegrees + 'deg)'; }
+  const paint = (sim, src) => new Promise((res) => { const im = new Image(); im.onload = () => {
+    sim.canvas.width = im.naturalWidth; sim.canvas.height = im.naturalHeight;
+    sim.canvas.getContext('2d').drawImage(im, 0, 0); res(); }; im.src = src; });
+  async function mountPanel(target, src) {
+    const sim = await window.Baguette.use({ host: HOST, udid, send: () => {},
+      definitionURL: `/simulators/${udid}/definition.json?panel=${target}` });
+    const holder = document.createElement('div'); sim.mount(holder);
+    const wrapper = holder.firstElementChild; wrapper.style.display = 'none'; frame.appendChild(wrapper);
+    await paint(sim, src);
+    panels[target] = { sim, wrapper };
+  }
+  await mountPanel('primary', 'lab-cover.jpg');
+  await mountPanel('secondary', 'lab-inner.jpg');
+  await new Promise(r => setTimeout(r, 600));  // bezels
+
+  function showPanel(target) {
+    for (const w of frame.querySelectorAll(':scope > div')) w.style.display = 'none';
+    panels[target].wrapper.style.display = ''; currentLitPanel = target;
+    snapOrientation(target === 'secondary' ? 'landscape-left' : 'portrait');
+  }
+  function fold() {
+    if (!foldView) foldView = new window.Baguette._FoldView(frame, () => rotationDegrees,
+      panels.secondary.sim.def.screen, panels.secondary.sim.screen,
+      { front: { wrapper: () => panels.secondary.wrapper }, back: { wrapper: () => panels.primary.wrapper, maskImage: panels.primary.sim.def.screen.maskImage, screen: panels.primary.sim.def.screen } });
+    return foldView;
+  }
+  const MOVE_DEGREES = Number(q.get('movedeg') || 40);
+  function beginOpening() {
+    frame.style.visibility = 'hidden';
+    showPanel('secondary');
+    if (foldView) { foldView.dispose(); foldView = null; }
+    fold().update(latestAngle); place(latestAngle);
+  }
+  // The book glides between the unfolded panel's place and the
+  // cover's over the last MOVE_DEGREES of the fold.
+  function place(a) {
+    if (!foldView) return;
+    if (a < MOVE_DEGREES) {
+      if (currentLitPanel !== 'primary') showPanel('primary');
+      foldView.moveProgress(1 - a / MOVE_DEGREES, panels.primary.wrapper.getBoundingClientRect());
+    } else if (currentLitPanel !== 'secondary') { showPanel('secondary'); foldView.moveProgress(0); }
+  }
+  function settleClosed() {
+    showPanel('primary');
+    if (foldView) { foldView.moveProgress(1, panels.primary.wrapper.getBoundingClientRect()); foldView.dispose(); foldView = null; }
+    frame.style.visibility = '';
+  }
+  showPanel('primary');
+  window.lab = { panels, fold, beginOpening, settleClosed, frame, view: () => foldView };
+
+  // scripted sweep: ease-out between poses over `ms`
+  const sweep = (from, to, ms) => new Promise((res) => {
+    const t0 = performance.now(); let n = 0;
+    const step = () => {
+      const p = Math.min(1, (performance.now() - t0) / ms); const e = 1 - Math.pow(1 - p, 3);
+      const a = from + (to - from) * e; latestAngle = a; n++;
+      if (n === 2 && to > from && currentLitPanel === 'primary') beginOpening();
+      if (foldView) { foldView.update(a); place(a); }
+      hud.textContent = `${a.toFixed(1)}° lit=${currentLitPanel}`;
+      if (p < 1) requestAnimationFrame(step); else res();
+    };
+    requestAnimationFrame(step);
+  });
+  const ms = Number(q.get('ms') || 800), hold = Number(q.get('hold') || 1500);
+  const seq = (q.get('seq') || 'open,close').split(',');
+  await new Promise(r => setTimeout(r, Number(q.get('delay') || 800)));
+  for (const s of seq) {
+    if (s === 'open')  { await sweep(latestAngle, 130, ms); showPanel('secondary'); fold().settle(130); }
+    if (s === 'flat')  { await sweep(latestAngle, 180, ms); showPanel('secondary'); fold().settle(180); }
+    if (s === 'close') { await sweep(latestAngle, 0, ms); if (!q.get('nomove')) settleClosed(); }
+    hud.textContent += ' settled'; await new Promise(r => setTimeout(r, hold));
+  }
+  hud.textContent += ' DONE';
+})().catch(e => { document.getElementById('hud').textContent = 'ERR ' + e.message; console.error(e); });
+</script></body></html>

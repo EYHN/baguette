@@ -149,8 +149,30 @@
       if (value !== previous) {
         rotationDegrees += 90;
       }
-      const wrapper = root.querySelector(':scope > div');
-      if (wrapper) wrapper.style.transform = 'rotate(' + rotationDegrees + 'deg)';
+      for (const wrapper of root.querySelectorAll(':scope > div')) {
+        wrapper.style.transform = 'rotate(' + rotationDegrees + 'deg)';
+      }
+    }
+  }
+
+  // Set an orientation outright, no cycle step and no animation —
+  // for a panel that arrives already turned (a foldable's unfolded
+  // panel is landscape by the guest's choice; its cover is portrait).
+  function snapOrientation(value) {
+    const canonical = { 'portrait': 0, 'landscape-left': 90, 'portrait-upside-down': 180, 'landscape-right': 270 };
+    currentOrientation = value;
+    rotationDegrees = canonical[value] || 0;
+    orientationIndex = Math.max(0, orientationCycle().indexOf(value));
+    const root = document.getElementById('nativeDeviceFrame');
+    if (!root) return;
+    if (value === 'portrait') root.removeAttribute('data-orientation');
+    else                      root.setAttribute('data-orientation', value);
+    for (const wrapper of root.querySelectorAll(':scope > div')) {
+      const t = wrapper.style.transition;
+      wrapper.style.transition = 'none';
+      wrapper.style.transform = 'rotate(' + rotationDegrees + 'deg)';
+      void wrapper.offsetWidth;
+      wrapper.style.transition = t;
     }
   }
 
@@ -331,22 +353,7 @@
             + (chromePick ? '?chrome=' + encodeURIComponent(chromePick) : '')
         : undefined;
     try {
-      sim = await window.Baguette.use({
-        host: location.origin,
-        udid,
-        definitionURL: deviceDefinitionURL,
-        send: (payload) => {
-          const out = currentOrientation === 'portrait'
-            ? payload
-            : remapEnvelopeToPortrait(payload);
-          const view = document.getElementById('simNativeView');
-          if (view && view.getAttribute('data-render3d') === 'open' &&
-              render3DPanel && render3DPanel.send(out)) return;
-          if (session) session.send(out);
-        },
-        getOrientation: () => currentOrientation,
-        log: (msg) => console.log('[native]', msg),
-      });
+      sim = await useSimulator(deviceDefinitionURL);
       sim.mount(document.getElementById('nativeDeviceFrame'));
     } catch (e) {
       console.warn('[native] no device definition:', (e && e.message) || e);
@@ -427,8 +434,14 @@
     if (hinge && hinge.foldable) {
       currentLitPanel = hinge.litPanel || 'primary';
       if (hinge.orientation && hinge.orientation !== 'portrait') applyOrientation(hinge.orientation);
-      if (!unfoldIn() && currentLitPanel === 'secondary' && typeof hinge.angleDegrees === 'number') {
-        // No sweep to replay — a fresh visit to a device already bent.
+      if (sim) {
+        const frame = document.getElementById('nativeDeviceFrame');
+        panels[currentLitPanel] = { sim, session, wrapper: frame.querySelector(':scope > div') };
+        void mountOtherPanel(currentLitPanel === 'primary' ? 'secondary' : 'primary');
+      }
+      if (currentLitPanel === 'secondary' && typeof hinge.angleDegrees === 'number') {
+        // A fresh visit to a device already bent.
+        latestAngle = hinge.angleDegrees;
         oncePainted(() => settleAt(hinge.angleDegrees));
       }
     } else if (isBooted(meta.state)) {
@@ -442,11 +455,32 @@
     if (!deviceMode) watchNetworkArmed();
 
     // A foldable can change which panel is lit under us — Device Hub's
-    // pose picker folds and unfolds iPhone Duo, and nothing on this
-    // page is told. The stream is bound to a panel, the bezel is one
-    // panel's chrome and the tap space is one panel's size, so the
-    // whole page is re-bootstrapped when the lit panel changes.
+    // pose picker folds and unfolds iPhone Duo. The stream socket's
+    // hinge samples drive the fold; this poll is the fallback that
+    // keeps the page on the lit panel when they are not flowing.
     if (!deviceMode) watchHinge();
+  }
+
+  // One SDK simulator for a definition URL, wired to this page's
+  // transport: the phone at boot, and a foldable's other panel when the
+  // hinge brings it in.
+  function useSimulator(definitionURL) {
+    return window.Baguette.use({
+      host: location.origin,
+      udid,
+      definitionURL,
+      send: (payload) => {
+        const out = currentOrientation === 'portrait'
+          ? payload
+          : remapEnvelopeToPortrait(payload);
+        const view = document.getElementById('simNativeView');
+        if (view && view.getAttribute('data-render3d') === 'open' &&
+            render3DPanel && render3DPanel.send(out)) return;
+        if (session) session.send(out);
+      },
+      getOrientation: () => currentOrientation,
+      log: (msg) => console.log('[native]', msg),
+    });
   }
 
   async function readHinge() {
@@ -456,28 +490,27 @@
     } catch (e) { return null; }
   }
 
-  // Polls `/hinge` on a foldable and reloads the page when the lit
-  // panel or its orientation changes — both are bound at boot (stream,
-  // bezel, tap space, rotation), so a change means starting over. A
-  // single-panel device answers `foldable:false` on the first poll and
-  // is never asked again: the read is a devicectl round-trip on the
-  // server, not something to pay for on a phone.
+  // Polls `/hinge` on a foldable as the fallback for a page whose
+  // socket samples are not flowing: the lit panel and its orientation
+  // are followed in place — both panels are mounted, so nothing needs
+  // a reload. A single-panel device answers `foldable:false` on the
+  // first poll and is never asked again: the read is a devicectl
+  // round-trip on the server, not something to pay for on a phone.
   let hingeTimer = null;
-  let hingePose = null;
   function watchHinge() {
     if (!udid || hingeTimer) return;
-    const poseOf = (state) => `${state.litPanel}/${state.orientation || 'portrait'}`;
     const poll = async () => {
       const state = await readHinge();
       if (!state) return;
       if (!state.foldable) { clearInterval(hingeTimer); hingeTimer = null; return; }
-      if (hingePose === null) { hingePose = poseOf(state); return; }
-      // The socket's hinge samples own the transition when they flow;
-      // the poll only steps in for a page whose socket is not up.
-      if (poseOf(state) !== hingePose && Date.now() - hingeLiveAt > 5000) {
-        clearInterval(hingeTimer); hingeTimer = null;
-        location.reload();
+      // The socket's hinge samples own the transition while they flow.
+      if (Date.now() - hingeLiveAt < 5000) return;
+      if (state.litPanel && state.litPanel !== currentLitPanel && panels[state.litPanel]) {
+        if (foldView) { foldView.dispose(); foldView = null; }
+        showPanel(state.litPanel);
+        if (typeof state.angleDegrees === 'number') settleAt(state.angleDegrees);
       }
+      if (state.orientation && state.orientation !== currentOrientation) snapOrientation(state.orientation);
     };
     poll();
     hingeTimer = setInterval(poll, 2000);
@@ -488,21 +521,16 @@
   // On a foldable the stream socket also carries `{"type":"hinge"}`
   // samples — the 60 Hz sweep Device Hub plays for a pose change (0°
   // closed, 130° open, 180° flat; 0.5–0.85 s, ease-out). While a sweep
-  // is running and this page has the unfolded panel, `FoldView` draws
-  // the live device as a book at each sample's angle. When the sweep
-  // settles on the other side of 90° the lit panel has changed, so the
-  // page hands the recorded sweep over sessionStorage and reloads;
-  // the page that arrives at the unfolded panel replays it with the
-  // same timing on its own live frame, and the one that arrives at the
-  // cover simply rises. The poll below stays as the fallback for a
-  // page whose socket is not up.
-  const FOLD_KEY = 'baguette.hinge.transition';
-  // A sweep's tail is sparse: Device Hub eases out and the monitor
-  // reports only changes ≥ 0.1°, so the last samples arrive up to
-  // ~0.5 s apart (measured 4.6° → 2.0° over 0.48 s). A shorter window
-  // called the sweep settled mid-fold and reloaded with the leaf still
-  // turning.
+  // runs, `FoldView` draws the unfolded panel as a book at each
+  // sample's angle. Crossing 90° means the other panel: it is brought
+  // in on this page, never by a reload — opening swaps the unfolded
+  // panel into the frame as the sweep starts and folds it open;
+  // closing prepares the cover offscreen and swaps it in behind the
+  // frozen fold once the sweep settles. The poll below stays as the
+  // fallback for a page whose socket is not up.
   const SWEEP_QUIET_MS = 750;
+  /** The slide between the shut book and the cover in its own place. */
+  const SWAP_MOVE_MS = 260;
   let currentLitPanel = 'primary';
   let foldView = null;
   let liveSweep = null;
@@ -513,7 +541,15 @@
     if (!foldView && window.Baguette && window.Baguette._FoldView && sim) {
       foldView = new window.Baguette._FoldView(
         document.getElementById('nativeDeviceFrame'), () => rotationDegrees,
-        sim.def ? sim.def.screen : null, sim.screen);
+        sim.def ? sim.def.screen : null, sim.screen, {
+          // The cover is the back of the left leaf: its live wrapper,
+          // clipped with its own mask.
+          back: {
+            wrapper: () => panels.primary && panels.primary.wrapper,
+            maskImage: panels.primary && panels.primary.sim.def && panels.primary.sim.def.screen
+              ? panels.primary.sim.def.screen.maskImage : null,
+          },
+        });
     }
     return foldView;
   }
@@ -545,7 +581,15 @@
     hingeLiveAt = Date.now();
     if (!liveSweep) liveSweep = new window.Baguette.HingeSweep();
     liveSweep.push(degrees, Date.now());
-    // One sample is the standing angle on connect; two or more is motion.
+    latestAngle = degrees;
+    // One sample is the standing angle on connect; two is motion, and
+    // its direction says which way the book is going. Crossing to the
+    // other panel is prepared now, while the hinge is still turning —
+    // the runtime lights the target panel as the sweep starts.
+    if (liveSweep.length === 2) {
+      if (liveSweep.opening && currentLitPanel === 'primary') beginOpening();
+      if (!liveSweep.opening && currentLitPanel === 'secondary') beginClosing();
+    }
     if (liveSweep.length > 1 && currentLitPanel === 'secondary') {
       const view = fold();
       if (view) view.update(degrees);
@@ -554,58 +598,112 @@
     sweepSettleTimer = setTimeout(onSweepSettled, SWEEP_QUIET_MS);
   }
 
-  function onSweepSettled() {
+  async function onSweepSettled() {
     const sweep = liveSweep;
     liveSweep = null;
-    if (!sweep) return;
-    if (sweep.length < 2 || sweep.litPanel === currentLitPanel) {
+    if (!sweep || sweep.length < 2) return;
+    if (sweep.litPanel === 'secondary') {
+      showPanel('secondary');
       settleAt(sweep.to);
+      confirmOrientation();
       return;
     }
-    try {
-      sessionStorage.setItem(FOLD_KEY, JSON.stringify({
-        at: Date.now(), to: sweep.litPanel, sweep: sweep.toJSON(),
-      }));
-    } catch (e) { /* no hand-off */ }
-    location.reload();
+    // Shut: the book lies closed with the cover on the left leaf's
+    // back. The real cover has been streaming all along — show it in
+    // its own place, slide the book onto it, then take the book down.
+    const view = foldView;
+    if (view) view.freeze();
+    showPanel('primary');
+    if (!view) return;
+    const target = panels.primary && panels.primary.wrapper.getBoundingClientRect();
+    await view.moveTo(target, SWAP_MOVE_MS);
+    if (foldView === view) { view.dispose(); foldView = null; }
   }
 
-  // Runs at boot on a foldable: replays a handed-over sweep on the
-  // unfolded panel once the stream has painted, or rises onto the cover.
-  function unfoldIn() {
-    let hand = null;
+  // --- both panels, always mounted ------------------------------------
+  //
+  // A foldable's page keeps the cover and the unfolded panel mounted
+  // side by side in #nativeDeviceFrame, each its own SDK simulator
+  // (definition, bezel, mask) with its own stream pinned to that panel
+  // by `?panel=`. A pose change is then only a matter of which one is
+  // shown and the fold drawn over it — nothing is fetched or bound
+  // mid-sweep. The dark panel emits next to no frames, so the second
+  // stream costs little.
+  let latestAngle = null;
+  const panels = {};   // 'primary' | 'secondary' → { sim, session, wrapper }
+
+  function panelWSUrl(format, target) {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${location.host}/simulators/${encodeURIComponent(udid)}/stream`
+      + `?format=${encodeURIComponent(format)}&version=v2&display=phone&panel=${target}`;
+  }
+
+  /** Mounts the other panel next to the current one, hidden, streaming. */
+  async function mountOtherPanel(target) {
+    if (panels[target]) return panels[target];
+    const frame = document.getElementById('nativeDeviceFrame');
+    const holder = document.createElement('div');
     try {
-      hand = JSON.parse(sessionStorage.getItem(FOLD_KEY) || 'null');
-      sessionStorage.removeItem(FOLD_KEY);
-    } catch (e) { return false; }
-    if (!hand || typeof hand !== 'object' || Date.now() - Number(hand.at) > 15000) return false;
-    if (hand.to !== 'secondary' || !window.Baguette || !window.Baguette.HingeSweep) { rise(); return true; }
-    const sweep = window.Baguette.HingeSweep.fromJSON(hand.sweep);
-    if (sweep.length < 2) { rise(); return true; }
+      const other = await useSimulator(
+        `/simulators/${encodeURIComponent(udid)}/definition.json?panel=${target}`);
+      other.mount(holder);
+      const wrapper = holder.firstElementChild;
+      if (!wrapper) return null;
+      wrapper.style.display = 'none';
+      frame.appendChild(wrapper);
+      const s = new window.StreamSession(Object.assign({
+        udid, format: currentFormat(), version: 'v2',
+        canvas: other.canvas,
+        url: panelWSUrl(currentFormat(), target),
+      }, sessionCallbacks()));
+      s.start();
+      panels[target] = { sim: other, session: s, wrapper };
+      return panels[target];
+    } catch (e) {
+      console.warn('[native] could not mount panel', target, (e && e.message) || e);
+      return null;
+    }
+  }
+
+  /** Shows one panel's wrapper and makes it the page's sim/session. */
+  function showPanel(target) {
+    const entry = panels[target];
+    if (!entry || currentLitPanel === target) return;
+    const frame = document.getElementById('nativeDeviceFrame');
+    for (const w of frame.querySelectorAll(':scope > div')) w.style.display = 'none';
+    entry.wrapper.style.display = '';
+    sim = entry.sim;
+    session = entry.session;
+    currentLitPanel = target;
+    snapOrientation(target === 'secondary' ? 'landscape-left' : 'portrait');
+    mountAxInspector();
+  }
+
+  // Opening: the cover is the back of the leaf, so the unfolded panel
+  // takes the frame at once and the fold draws it opening from shut.
+  function beginOpening() {
+    if (!panels.secondary) return;
+    const frame = document.getElementById('nativeDeviceFrame');
+    const from = panels.primary && panels.primary.wrapper.getBoundingClientRect();
+    frame.style.visibility = 'hidden';
+    showPanel('secondary');
+    if (foldView) { foldView.dispose(); foldView = null; }
     const view = fold();
-    if (!view) return false;
-    // Open shut, so the first painted frame is not seen flat before the turn.
-    view.update(sweep.from);
-    oncePainted(() => {
-      const ms = sweep.replay((a) => view.update(a));
-      setTimeout(() => settleAt(sweep.to), ms + 120);
-    });
-    return true;
+    if (!view) return;
+    view.update(latestAngle == null ? 0 : latestAngle);
+    // The shut book's cover starts exactly over the cover the page
+    // was showing, and settles into the unfolded panel's place as
+    // the leaves begin to turn.
+    view.moveFrom(from, SWAP_MOVE_MS);
   }
 
-  function rise() {
-    const root = document.getElementById('nativeDeviceFrame');
-    if (!root) return;
-    const ms = 220;
-    root.style.transition = 'none';
-    root.style.opacity = '0';
-    root.style.transform = 'scale(0.96)';
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      root.style.transition = `opacity ${ms}ms ease-out, transform ${ms}ms ease-out`;
-      root.style.opacity = '';
-      root.style.transform = '';
-      setTimeout(() => { root.style.transition = ''; }, ms + 50);
-    }));
+  function beginClosing() { /* the cover is already mounted and streaming */ }
+
+  async function confirmOrientation() {
+    const state = await readHinge();
+    if (state && state.orientation && state.orientation !== currentOrientation) {
+      snapOrientation(state.orientation);
+    }
   }
 
   function resetToPortrait() {
@@ -666,47 +764,59 @@
   // given wire format. Tearing down + restarting is the cheapest way
   // to swap formats — the WS protocol is per-connection and the
   // server's makeStream(...) is keyed at session open.
-  function startSession(format) {
-    // A recording samples the canvas this session paints into; a
-    // restart (format swap, 3D close, device re-open) leaves it blank
-    // for however long the new socket takes to land its first frame.
-    if (session) cancelRecording('stream restarted');
-    if (session) { try { session.stop(); } catch (_) {} session = null; }
-    // Same text-frame router as sim-stream.js: hand JSON envelopes
-    // to the inspector first, then claim paste_result; anything
-    // nobody claims falls through to the decoder's error logger.
-    const onStreamText = (env) => {
-      if (env && env.type === 'hinge') { onHingeSample(env.angleDegrees); return true; }
-      if (axInspector && axInspector.handleEnvelope(env)) return true;
-      if (env && env.type === 'paste_result') {
-        if (!env.ok) console.warn('[native] paste failed:', env.error || 'unknown');
-        return true;
-      }
-      if (env && env.type === 'copy_result') {
-        console.log(env.ok
-          ? '[native] copied sim pasteboard to host clipboard'
-          : '[native] copy failed: ' + (env.error || 'unknown'));
-        return true;
-      }
-      return false;
-    };
-    session = new window.StreamSession({
-      udid, format, version: 'v2',
-      display: 'phone',
-      canvas: sim.canvas,
+  // Same text-frame router as sim-stream.js: hand JSON envelopes to
+  // the inspector first, then claim paste_result; anything nobody
+  // claims falls through to the decoder's error logger. Shared by the
+  // phone session and a foldable's pinned panel sessions.
+  function routeStreamText(env) {
+    if (env && env.type === 'hinge') { onHingeSample(env.angleDegrees); return true; }
+    if (axInspector && axInspector.handleEnvelope(env)) return true;
+    if (env && env.type === 'paste_result') {
+      if (!env.ok) console.warn('[native] paste failed:', env.error || 'unknown');
+      return true;
+    }
+    if (env && env.type === 'copy_result') {
+      console.log(env.ok
+        ? '[native] copied sim pasteboard to host clipboard'
+        : '[native] copy failed: ' + (env.error || 'unknown'));
+      return true;
+    }
+    return false;
+  }
+
+  function sessionCallbacks(onFirstPaint) {
+    let painted = false;
+    return {
       onSize: (w, h) => {
         lastPaintedSize = { w, h };
         // First frame after a boot — the guest is genuinely up, so
         // drop the power card and hand the screen back to the stream.
         hidePowerCard();
+        if (!painted) { painted = true; if (onFirstPaint) onFirstPaint(); }
       },
       onFps:  (fps) => {
         const el = document.getElementById('nativeStatus');
         if (el) el.textContent = fps + ' fps';
       },
       onLog: (msg) => console.log('[native]', msg),
-      onText: onStreamText,
-    });
+      onText: routeStreamText,
+    };
+  }
+
+  function startSession(format) {
+    // A recording samples the canvas this session paints into; a
+    // restart (format swap, 3D close, device re-open) leaves it blank
+    // for however long the new socket takes to land its first frame.
+    if (session) cancelRecording('stream restarted');
+    if (session) { try { session.stop(); } catch (_) {} session = null; }
+    session = new window.StreamSession(Object.assign({
+      udid, format, version: 'v2',
+      display: 'phone',
+      canvas: sim.canvas,
+    }, sessionCallbacks()));
+    if (panels[currentLitPanel] && panels[currentLitPanel].sim === sim) {
+      panels[currentLitPanel].session = session;
+    }
     // `boot()` runs this before wiring the toolbar and unload handler,
     // so a throw here killed the whole page, not just the canvas (#71).
     try {

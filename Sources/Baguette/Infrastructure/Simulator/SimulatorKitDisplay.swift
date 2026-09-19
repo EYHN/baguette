@@ -7,6 +7,9 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
     private let host: any DeviceHost
     private let enumerateIO: () throws -> String
     private let hinge: any Hinge
+    /// When set, the lit panel is this one and the hinge is not asked —
+    /// see `Displays.panel(_:)`.
+    private let pinnedPanel: IntegratedPanel?
     private let lock = NSLock()
     private var cached: DisplayBinding?
 
@@ -15,13 +18,15 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
         udid: String,
         host: any DeviceHost,
         enumerateIO: @escaping () throws -> String,
-        hinge: any Hinge
+        hinge: any Hinge,
+        pinnedPanel: IntegratedPanel? = nil
     ) {
         self.kind = kind
         self.udid = udid
         self.host = host
         self.enumerateIO = enumerateIO
         self.hinge = hinge
+        self.pinnedPanel = pinnedPanel
     }
 
     /// Binds the plane. On a foldable this also asks the hinge which
@@ -34,9 +39,8 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
             ports: sized,
             screens: screens
         )
-        let litPanel: IntegratedPanel = IntegratedPanels.several(in: sized)
-            ? (hinge.angle()?.litPanel ?? .primary)
-            : .primary
+        let litPanel: IntegratedPanel = pinnedPanel
+            ?? (IntegratedPanels.several(in: sized) ? (hinge.angle()?.litPanel ?? .primary) : .primary)
         let binding = try ConnectedScreens.binding(kind: kind, ports: ports, litPanel: litPanel)
         lock.lock()
         cached = binding

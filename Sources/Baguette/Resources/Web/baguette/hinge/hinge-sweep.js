@@ -24,13 +24,13 @@
     }
 
     /**
-     * Each leaf's turn about the seam for a hinge angle. The bend is
-     * centred, as Device Hub draws it: the spine stays put and both
-     * pages take half the fold, rising toward the viewer. Positive
-     * rotateY brings an element's left edge forward, so the left leaf
-     * turns positive and the right negative.
+     * Each leaf's turn about the seam for a hinge angle, in degrees.
+     * The bend is centred, as Device Hub draws it: the spine stays put
+     * and both pages take half the fold, rising toward the viewer.
+     * Positive rotateY brings an element's left edge forward, so the
+     * left leaf turns positive and the right negative.
      */
-    static leafTransforms(degrees) {
+    static leafAngles(degrees) {
       const fold = Math.max(0, Math.min(180, 180 - degrees));
       const half = fold / 2;
       // Above the open pose the bend is centred. Below it the book is
@@ -41,8 +41,14 @@
       const share = Math.max(0, Math.min(1, degrees / OPEN_POSE_DEGREES));
       const right = -half * share;
       const left = fold + right;
-      const r = (v) => Math.round(v * 100) / 100;
-      return { left: `rotateY(${r(left)}deg)`, right: `rotateY(${r(right)}deg)` };
+      const r = (v) => Math.round(v * 100) / 100 || 0;   // no -0
+      return { left: r(left), right: r(right) };
+    }
+
+    /** `leafAngles` as CSS transforms. */
+    static leafTransforms(degrees) {
+      const a = HingeSweep.leafAngles(degrees);
+      return { left: `rotateY(${a.left}deg)`, right: `rotateY(${a.right}deg)` };
     }
 
     push(degrees, atMs) {

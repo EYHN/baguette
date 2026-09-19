@@ -5,9 +5,17 @@ import Foundation
 final class SimulatorKitDisplays: Displays, @unchecked Sendable {
     let phone: any Display
     let carPlay: any Display
+    private let udid: String
+    private let host: any DeviceHost
+    private let hinge: any Hinge
+    private let enumerateIO: () throws -> String
 
     init(udid: String, host: any DeviceHost, hinge: any Hinge) {
         let enumerateIO = { try SimctlIOCapture.enumerate(udid: udid) }
+        self.udid = udid
+        self.host = host
+        self.hinge = hinge
+        self.enumerateIO = enumerateIO
         self.phone = SimulatorKitDisplay(
             kind: .phone,
             udid: udid,
@@ -21,6 +29,17 @@ final class SimulatorKitDisplays: Displays, @unchecked Sendable {
             host: host,
             enumerateIO: enumerateIO,
             hinge: hinge
+        )
+    }
+
+    func panel(_ panel: IntegratedPanel) -> any Display {
+        SimulatorKitDisplay(
+            kind: .phone,
+            udid: udid,
+            host: host,
+            enumerateIO: enumerateIO,
+            hinge: hinge,
+            pinnedPanel: panel
         )
     }
 }

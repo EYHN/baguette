@@ -112,3 +112,51 @@ private extension VerifiedDeviceAssetsTests {
         )
     }
 }
+
+// An asset Apple ships inside Xcode — iPhone Duo's `V68.usdz` in
+// DeviceKit's plug-in — is read from the selected Xcode, the way the 2D
+// chromes are read from `/Library/Developer/DeviceKit`.
+extension VerifiedDeviceAssetsTests {
+    @Test func `an asset that lives in Xcode resolves under the selected Xcode's Contents`() throws {
+        let scratch = try Self.makeScratch()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let contents = scratch.appending(path: "Xcode.app/Contents")
+        let resource = "SharedFrameworks/DeviceKit.framework/Resources/V68.usdz"
+        let asset = contents.appending(path: resource)
+        try FileManager.default.createDirectory(
+            at: asset.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("USDZ".utf8).write(to: asset)
+        let assets = VerifiedDeviceAssets(
+            cacheRoot: scratch.appending(path: "cache"),
+            fetch: { _ in Data() },
+            developerDir: { contents.appending(path: "Developer").path }
+        )
+
+        #expect(try assets.resolve(Self.model(directory: scratch, xcodeResource: resource)) == asset)
+    }
+
+    @Test func `a missing Xcode asset names the resource it looked for`() throws {
+        let scratch = try Self.makeScratch()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let assets = VerifiedDeviceAssets(
+            cacheRoot: scratch.appending(path: "cache"),
+            fetch: { _ in Data() },
+            developerDir: { scratch.appending(path: "Xcode.app/Contents/Developer").path }
+        )
+
+        #expect(throws: DeviceModelError.localAssetNotFound("Plugins/V68.usdz")) {
+            try assets.resolve(Self.model(directory: scratch, xcodeResource: "Plugins/V68.usdz"))
+        }
+    }
+
+    static func model(directory: URL, xcodeResource: String) -> InstalledDeviceModel {
+        let base = model(directory: directory, file: nil)
+        return InstalledDeviceModel(
+            definition: DeviceModelDefinition(
+                schemaVersion: 1, id: base.definition.id, displayName: base.definition.displayName,
+                matches: base.definition.matches,
+                asset: DeviceModelAsset(file: nil, downloadURL: nil, sha256: nil, xcodeResource: xcodeResource),
+                scene: base.definition.scene, variantSets: []),
+            directoryURL: directory)
+    }
+}

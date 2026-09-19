@@ -564,7 +564,9 @@ struct Server: Sendable {
         // page consumes the SDK this route becomes the only chrome read.
         router.get("/simulators/:udid/definition.json") { [simulators, chromes] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
-            return Self.definitionJSON(udid: Self.udidParam(r), simulators: simulators, chromes: chromes)
+            return Self.definitionJSON(
+                udid: Self.udidParam(r), simulators: simulators, chromes: chromes,
+                panel: Self.panelQuery(r.uri.queryParameters.get("panel").map { String($0) }))
         }
         // The lit panel's framebuffer mask — the shape the simulator
         // clips that screen to. 404 when the chrome names none; the page
@@ -809,6 +811,7 @@ struct Server: Sendable {
                 format: context.request.uri.queryParameters.get("format")
                     .flatMap { StreamFormat(rawValue: $0) } ?? .mjpeg,
                 displayQuery: context.request.uri.queryParameters.get("display"),
+                panelQuery: context.request.uri.queryParameters.get("panel").map { String($0) },
                 simulators: simulators,
                 chromes: chromes,
                 inbound: inbound,
@@ -1758,10 +1761,11 @@ struct Server: Sendable {
     private static func definitionJSON(
         udid: String,
         simulators: any Simulators,
-        chromes: any Chromes
+        chromes: any Chromes,
+        panel: IntegratedPanel? = nil
     ) -> Response {
         guard let json = definitionJSONString(
-            udid: udid, simulators: simulators, chromes: chromes
+            udid: udid, simulators: simulators, chromes: chromes, panel: panel
         ) else {
             return errorJSON("no definition for udid \(udid)", status: .notFound)
         }
@@ -1801,12 +1805,14 @@ struct Server: Sendable {
     static func definitionJSONString(
         udid: String,
         simulators: any Simulators,
-        chromes: any Chromes
+        chromes: any Chromes,
+        panel pinned: IntegratedPanel? = nil
     ) -> String? {
         guard !udid.isEmpty, let sim = simulators.find(udid: udid) else { return nil }
         // Resolve the panel once: it names the chrome and it says
-        // whether the screen is a foldable's creased, unfolded one.
-        let panel = sim.litPanel(in: chromes)
+        // whether the screen is a foldable's creased, unfolded one. A
+        // page bringing the other panel in names it; otherwise the hinge.
+        let panel = pinned ?? sim.litPanel(in: chromes)
         let assets: DeviceChromeAssets?
         switch panel {
         case .primary:   assets = chromes.assets(forDeviceName: sim.deviceTypeName)
@@ -2671,17 +2677,36 @@ struct Server: Sendable {
             quality: 0.7
         )
         // 3D stays phone-only; ignore any display=carplay on these routes.
-        let bound: (screen: any Screen, input: any Input)
-        do {
-            bound = try StreamDisplayPlan.phoneOnly.bind(to: sim)
-        } catch {
-            try? await outbound.write(.text(
-                #"{"ok":false,"error":"\#(jsonEscape(String(describing: error)))"}"#
-            ))
-            return
+        let screen: any Screen
+        let input: any Input
+        let refresh: () -> Void
+        if plan.model.definition.scene.fold != nil {
+            // A foldable: both panels on the book's two screens, the
+            // hinge posing it; taps follow the lit panel as everywhere.
+            let unfolded = sim.displays().panel(.secondary)
+            let cover = sim.displays().panel(.primary)
+            let book = RenderedFoldable(
+                unfolded: unfolded.screen(), cover: cover.screen(),
+                hinge: sim.hinge(), scene: scene
+            )
+            screen = book
+            input = sim.input()
+            refresh = { book.refresh() }
+        } else {
+            let bound: (screen: any Screen, input: any Input)
+            do {
+                bound = try StreamDisplayPlan.phoneOnly.bind(to: sim)
+            } catch {
+                try? await outbound.write(.text(
+                    #"{"ok":false,"error":"\#(jsonEscape(String(describing: error)))"}"#
+                ))
+                return
+            }
+            let rendered = RenderedScreen(source: bound.screen, scene: scene)
+            screen = rendered
+            input = bound.input
+            refresh = { rendered.refresh() }
         }
-        let screen = RenderedScreen(source: bound.screen, scene: scene)
-        let input = bound.input
         let pasteboard = sim.pasteboard()
         let dispatcher = GestureDispatcher(input: input)
         do {
@@ -2709,7 +2734,7 @@ struct Server: Sendable {
                         line: line,
                         scene: scene
                     ) {
-                        screen.refresh()
+                        refresh()
                         if let quad = scene.screenQuad, let json = screenQuadJSON(quad) {
                             try? await outbound.write(.text(json))
                         }
@@ -2747,6 +2772,7 @@ struct Server: Sendable {
         udid: String,
         format: StreamFormat,
         displayQuery: String?,
+        panelQuery: String? = nil,
         simulators: any Simulators,
         chromes: any Chromes,
         inbound: WebSocketInboundStream,
@@ -2757,7 +2783,7 @@ struct Server: Sendable {
             return
         }
 
-        let displayPlan = StreamDisplayPlan.from(query: displayQuery)
+        let displayPlan = StreamDisplayPlan.from(query: displayQuery, panel: panelQuery)
         let bound: (screen: any Screen, input: any Input)
         do {
             bound = try displayPlan.bind(to: sim)

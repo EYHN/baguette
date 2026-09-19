@@ -96,3 +96,12 @@ test('replaying a sweep hands each sample on at its recorded offset', () => {
   timers.forEach(t => t[1]());
   assert.deepEqual(calls, [0, 60, 130]);
 });
+
+test('leaf angles are the numbers the transforms are built from', () => {
+  const { HingeSweep } = load();
+  // The fold view needs the numbers too — to stack the left leaf over
+  // the right once it has turned past the seam.
+  assert.deepEqual(HingeSweep.leafAngles(130), { left: 25, right: -25 });
+  assert.deepEqual(HingeSweep.leafAngles(0), { left: 180, right: 0 });
+  assert.deepEqual(HingeSweep.leafAngles(65), { left: 86.25, right: -28.75 });
+});

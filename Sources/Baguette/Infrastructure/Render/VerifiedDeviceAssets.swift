@@ -10,16 +10,29 @@ struct VerifiedDeviceAssets: @unchecked Sendable {
 
     private let cacheRoot: URL
     private let fetch: Fetch
+    private let developerDir: () -> String
 
     init(
         cacheRoot: URL = Self.defaultCacheRoot,
-        fetch: @escaping Fetch = { try Data(contentsOf: $0) }
+        fetch: @escaping Fetch = { try Data(contentsOf: $0) },
+        developerDir: @escaping () -> String = { CoreSimulators.developerDir() }
     ) {
         self.cacheRoot = cacheRoot
         self.fetch = fetch
+        self.developerDir = developerDir
     }
 
     func resolve(_ model: InstalledDeviceModel) throws -> URL {
+        // An asset Apple ships inside Xcode: `<Xcode>/Contents/<resource>`,
+        // the developer dir being `<Xcode>/Contents/Developer`.
+        if let resource = model.definition.asset.xcodeResource, !resource.isEmpty {
+            let contents = URL(fileURLWithPath: developerDir()).deletingLastPathComponent()
+            let candidate = contents.appending(path: resource)
+            guard FileManager.default.fileExists(atPath: candidate.path) else {
+                throw DeviceModelError.localAssetNotFound(resource)
+            }
+            return candidate
+        }
         if model.definition.asset.file != nil {
             do {
                 return try model.localAssetURL()

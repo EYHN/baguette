@@ -24,11 +24,24 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private var wrapper: Entity!
     private var cameraEntity: PerspectiveCamera!
     private var cameraFraming: DeviceCameraFraming!
-    private var screenEntity: ModelEntity!
-    private var screenMaterialIndex: Int = 0
-    private var screenTexture: LowLevelTexture?
-    private var screenSourceSize: RenderDimensions?
-    private var screenContentRegion: ContentRegion?
+    /// One screen of the model: the mesh and material slot the simulator
+    /// frames land on, and the streaming texture sized to those frames.
+    private struct ScreenSlot {
+        let entity: ModelEntity
+        let materialIndex: Int
+        let textureSize: RenderDimensions
+        var texture: LowLevelTexture?
+        var sourceSize: RenderDimensions?
+        var contentRegion: ContentRegion?
+    }
+    private var screen: ScreenSlot!
+    /// A foldable's cover, on the far side of the leaf that folds over.
+    private var coverScreen: ScreenSlot?
+    /// Between the wrapper (the requested rotation) and the model: the
+    /// authored rest rotation, and a foldable's centring turn.
+    private var rest: Entity!
+    private var restOrientation = simd_quatf(angle: 0, axis: [0, 1, 0])
+    private var foldController: AnimationPlaybackController?
     private var screenLocalCorners: ScreenLocalCorners!
     private(set) var screenQuad: ScreenQuad?
     private var renderTargets: MetalRenderTargetRing!
@@ -67,7 +80,35 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
 
     func render(screen surface: IOSurface) throws -> IOSurface {
         try Self.onMain {
-            try self.renderFrame(surface)
+            try self.paint(&self.screen, with: surface)
+            return try self.renderScene()
+        }
+    }
+
+    func render(screens: FoldableScreens) throws -> IOSurface {
+        try Self.onMain {
+            if let surface = screens.unfolded {
+                try self.paint(&self.screen, with: surface)
+            }
+            if let surface = screens.cover, self.coverScreen != nil {
+                try self.paint(&self.coverScreen!, with: surface)
+            }
+            return try self.renderScene()
+        }
+    }
+
+    /// Pose the book: the shutting clip at the angle's time, the whole
+    /// device turned back to centre the bend (`FoldPose`).
+    func update(hingeDegrees: Double) {
+        Self.onMain {
+            guard let fold = self.plan.model.definition.scene.fold,
+                  let controller = self.foldController else { return }
+            let pose = FoldPose.at(degrees: hingeDegrees, fold: fold)
+            controller.time = pose.clipTime
+            controller.pause()
+            self.rest.orientation = simd_quatf(
+                angle: Self.radians(pose.yawDegrees), axis: [0, 1, 0]
+            ) * self.restOrientation
         }
     }
 
@@ -147,10 +188,33 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
                 definition.scene.screenNode ?? definition.scene.screenMaterial
             )
         }
-        screenEntity = screen
-        screenMaterialIndex = screen.model?.materials.firstIndex {
-            $0.name == definition.scene.screenMaterial
-        } ?? 0
+        self.screen = ScreenSlot(
+            entity: screen,
+            materialIndex: screen.model?.materials.firstIndex {
+                $0.name == definition.scene.screenMaterial
+            } ?? 0,
+            textureSize: definition.scene.textureSize
+        )
+        if let fold = definition.scene.fold {
+            guard let cover = Self.findScreenEntity(
+                under: subject, explicitName: nil, materialName: fold.coverMaterial
+            ) else {
+                throw DeviceModelError.sceneNodeNotFound(fold.coverMaterial)
+            }
+            coverScreen = ScreenSlot(
+                entity: cover,
+                materialIndex: cover.model?.materials.firstIndex {
+                    $0.name == fold.coverMaterial
+                } ?? 0,
+                textureSize: fold.coverTextureSize
+            )
+            guard let clip = subject.availableAnimations.first(where: {
+                $0.name == fold.clip && $0.definition.duration.isFinite
+            }) else {
+                throw DeviceModelError.sceneNodeNotFound(fold.clip)
+            }
+            foldController = subject.playAnimation(clip, transitionDuration: 0, startsPaused: true)
+        }
         if plan.screenGlass {
             try Self.addCoverGlass(over: screen, subject: subject)
         }
@@ -159,17 +223,23 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         renderer = stage
         let wrapperEntity = Entity()
         wrapperEntity.name = "baguette-device"
+        let restEntity = Entity()
+        restEntity.name = "baguette-rest"
         subject.removeFromParent()
-        wrapperEntity.addChild(subject)
+        restEntity.addChild(subject)
+        wrapperEntity.addChild(restEntity)
         stage.entities.append(wrapperEntity)
         wrapper = wrapperEntity
+        rest = restEntity
+        restOrientation = Self.orientation(definition.scene.restRotation ?? .zero)
+        restEntity.orientation = restOrientation
 
         let bounds = subject.visualBounds(relativeTo: wrapperEntity)
         let extents = bounds.extents
         guard extents.x > 0 || extents.y > 0 || extents.z > 0 else {
             throw DeviceModelError.sceneHasNoGeometry
         }
-        subject.position -= bounds.center
+        subject.position -= subject.visualBounds(relativeTo: restEntity).center
         wrapperEntity.orientation = Self.orientation(plan.rotation)
 
         let screenBounds = screen.visualBounds(relativeTo: wrapperEntity)
@@ -256,14 +326,17 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     // MARK: - per-frame rendering (MainActor)
 
     @MainActor
-    private func renderFrame(_ surface: IOSurface) throws -> IOSurface {
+    private func paint(_ slot: inout ScreenSlot, with surface: IOSurface) throws {
         let sourceSize = RenderDimensions(
             width: IOSurfaceGetWidth(surface),
             height: IOSurfaceGetHeight(surface)
         )
-        let texture = try screenLowLevelTexture(for: sourceSize)
-        try blit(surface, into: texture, size: sourceSize)
+        let texture = try screenLowLevelTexture(for: sourceSize, on: &slot)
+        try blit(surface, into: texture, size: sourceSize, region: slot.contentRegion)
+    }
 
+    @MainActor
+    private func renderScene() throws -> IOSurface {
         let target = renderTargets.next()
         let output = try supersampled?.output ?? RealityRenderer.CameraOutput(
             .singleProjection(colorTexture: target.texture)
@@ -295,10 +368,11 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     /// to the simulator surface; UV placement handles cover/contain/stretch.
     @MainActor
     private func screenLowLevelTexture(
-        for sourceSize: RenderDimensions
+        for sourceSize: RenderDimensions,
+        on slot: inout ScreenSlot
     ) throws -> LowLevelTexture {
-        if let screenTexture, screenSourceSize == sourceSize {
-            return screenTexture
+        if let texture = slot.texture, slot.sourceSize == sourceSize {
+            return texture
         }
         let texture = try LowLevelTexture(descriptor: .init(
             pixelFormat: .bgra8Unorm_srgb,
@@ -311,26 +385,26 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         material.color = .init(tint: .white, texture: .init(try .init(from: texture)))
         let placement = plan.fit.placement(
             source: sourceSize,
-            target: plan.model.definition.scene.textureSize
+            target: slot.textureSize
         )
         material.textureCoordinateTransform = .init(
             offset: [Float(placement.offsetX), Float(placement.offsetY)],
             scale: [Float(placement.scaleX), Float(placement.scaleY)]
         )
-        if var model = screenEntity.model {
+        if var model = slot.entity.model {
             var materials = model.materials
-            materials[screenMaterialIndex] = material
+            materials[slot.materialIndex] = material
             model.materials = materials
-            screenEntity.model = model
+            slot.entity.model = model
         }
         // The visible window keeps a permanent 2-pixel black border, and
         // per-frame blits cover only the interior. Texture filtering fades
         // content into the border over a texel, so the display's content
         // edge resolves smoothly instead of dot-dashing at the mesh edge.
         try blackFill(texture, size: sourceSize)
-        screenContentRegion = placement.contentRegion(in: sourceSize, inset: 2)
-        screenTexture = texture
-        screenSourceSize = sourceSize
+        slot.contentRegion = placement.contentRegion(in: sourceSize, inset: 2)
+        slot.texture = texture
+        slot.sourceSize = sourceSize
         return texture
     }
 
@@ -373,7 +447,8 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private func blit(
         _ surface: IOSurface,
         into texture: LowLevelTexture,
-        size: RenderDimensions
+        size: RenderDimensions,
+        region: ContentRegion?
     ) throws {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm_srgb,
@@ -397,7 +472,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         guard let encoder = commandBuffer.makeBlitCommandEncoder() else {
             throw DeviceModelError.renderFailed
         }
-        if let region = screenContentRegion, region.width > 0, region.height > 0 {
+        if let region, region.width > 0, region.height > 0 {
             encoder.copy(
                 from: source,
                 sourceSlice: 0,

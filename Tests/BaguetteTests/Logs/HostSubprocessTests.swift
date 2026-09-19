@@ -56,6 +56,27 @@ struct HostSubprocessTests {
         #expect(run.output.contains("to-stderr"))
     }
 
+    // MARK: - end of output
+
+    /// `FileHandle.readabilityHandler` keeps firing with empty data once
+    /// the pipe reaches end-of-file until it is cleared — a busy loop.
+    /// A child that exits on its own (every one-shot `simctl`, a
+    /// `devicectl` monitor whose timeout lands) must not leave one
+    /// behind: `serve` was found pinned at 100% by two of these.
+    @Test func `a child that exits on its own stops being read`() async throws {
+        let sub = HostSubprocess()
+        let finished = Finished()
+        try sub.run(
+            executable: URL(fileURLWithPath: "/bin/echo"), arguments: ["bye"],
+            onBytes: { _ in }, onExit: { finished.complete($0) }
+        )
+        _ = try await finished.value(timeout: Self.childDeadline)
+        // The reader is released shortly after EOF; give the source a
+        // moment to deliver it.
+        for _ in 0..<50 where sub.isReading { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!sub.isReading, "the pipe is still being read after the child exited")
+    }
+
     // MARK: - descriptors
 
     /// `Process` closes the parent's copy of the stdout pipe's write end
