@@ -88,3 +88,34 @@ struct HingeMessageTests {
         #expect(Server.hingeMessage(HingeAngle(degrees: 3.8)) == #"{"type":"hinge","angleDegrees":3.8}"#)
     }
 }
+
+
+/// `POST /simulators/<udid>/hinge?pose=open` — the hinge driven from the
+/// page's picker, the CLI or a script. Pure dispatch, every branch.
+@Suite("Server hinge drive")
+struct HingeDriveRoutesTests {
+    @Test func `a pose sweeps the hinge over Device Hub's time`() throws {
+        let host = MockSimulators(), sim = MockSimulator(), hinge = MockHinge()
+        given(host).find(udid: .value("U")).willReturn(sim)
+        given(sim).hinge().willReturn(hinge)
+        given(hinge).fold(to: .any, over: .any).willReturn()
+
+        #expect(Server.driveHinge(udid: "U", pose: "open", angle: nil, duration: nil, simulators: host) == .ok)
+        verify(hinge).fold(to: .value(130), over: .value(HingeCommand.defaultDuration)).called(1)
+    }
+
+    @Test func `a bad request, an unknown device and a device that cannot be driven each say so`() {
+        let host = MockSimulators(), sim = MockSimulator(), hinge = MockHinge()
+        given(host).find(udid: .value("U")).willReturn(sim)
+        given(host).find(udid: .value("ghost")).willReturn(nil)
+        given(sim).hinge().willReturn(hinge)
+        given(hinge).fold(to: .any, over: .any).willThrow(HingeError.toolMissing)
+
+        #expect(Server.driveHinge(udid: "U", pose: "tent", angle: nil, duration: nil, simulators: host)
+            == .invalid(HingeCommandError.unknownPose("tent")))
+        #expect(Server.driveHinge(udid: "ghost", pose: "open", angle: nil, duration: nil, simulators: host)
+            == .unknownDevice)
+        #expect(Server.driveHinge(udid: "U", pose: nil, angle: "90", duration: nil, simulators: host)
+            == .failed(HingeError.toolMissing))
+    }
+}

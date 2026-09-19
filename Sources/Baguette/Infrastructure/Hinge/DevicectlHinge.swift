@@ -77,6 +77,11 @@ final class DevicectlHinge: Hinge, @unchecked Sendable {
         return state.reading
     }
 
+    /// devicectl only reads; `SharedHinge` drives through its motor.
+    func fold(to degrees: Double, over duration: TimeInterval) throws {
+        throw HingeError.toolMissing
+    }
+
     func watch(onAngle: @escaping @Sendable (HingeAngle) -> Void) -> any HingeWatch {
         let watch = Watch(child: subprocess())
         do {

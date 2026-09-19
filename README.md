@@ -62,6 +62,11 @@ https://github.com/user-attachments/assets/65dc62ee-f0c7-48fb-9c57-5bd267c8c02f
   loaded into every sim-launched app via `DYLD_INSERT_LIBRARIES`;
   baguette pumps BGRA frames through a shared-memory ring buffer.
   See [`docs/features/camera.md`](docs/features/camera.md).
+- **iPhone Duo's hinge** — `baguette hinge --udid <X> --pose open`
+  folds and unfolds Xcode 27.1's foldable the way Device Hub's picker
+  does, from the CLI, `POST /simulators/<udid>/hinge`, or the pose
+  picker under the 3D book the page draws for it. See
+  [`docs/features/hinge.md`](docs/features/hinge.md).
 - **Device orientation** — `baguette orientation --udid <X> portrait`
   rotates a booted simulator. Wire JSON + a one-click rotate button
   on the focus-mode toolbar. Fires a `GSEventTypeDeviceOrientationChanged`
@@ -196,6 +201,8 @@ baguette <command> [options]
                                              leaves devices booted when a
                                              window closes or the app quits
                                              (machine-wide)
+  hinge --udid <UDID> [--pose closed|open|   Read or move iPhone Duo's hinge
+        flat | --angle 0-180] [--duration s]   (HingeControl in the guest)
   orientation --udid <UDID>                  Rotate the booted simulator
               <portrait|landscape-left|       (GSEvent over PurpleWorkspacePort —
                landscape-right|portrait-      no NSView, host stays headless)
@@ -404,6 +411,8 @@ rejected.
 | `POST` | `/simulators/:udid/boot`                   | `simulator.boot()`           |
 | `POST` | `/simulators/:udid/shutdown`               | `simulator.shutdown()`       |
 | `POST` | `/simulators/:udid/orientation?value=…`    | `simulator.orientation().set(…)` |
+| `GET`  | `/simulators/:udid/hinge`                  | iPhone Duo's hinge angle, lit panel, orientation |
+| `POST` | `/simulators/:udid/hinge?pose=…\|angle=…`  | `simulator.hinge().fold(to:over:)` |
 | `GET`  | `/simulators/:udid/definition.json`        | SDK bootstrap: identity + screen rect + bezel image URLs + per-button envelope/box/transform |
 | `GET`  | `/simulators/:udid/chrome.json`            | DeviceKit bezel layout       |
 | `GET`  | `/simulators/:udid/bezel.png`              | rasterized bezel PNG         |

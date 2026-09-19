@@ -28,6 +28,13 @@ final class RenderedFoldable: Screen, @unchecked Sendable {
     /// A scene starts flat. Nothing is composed until the book has been
     /// posed, or the first frame would show it open when shut.
     private var isPosed = false
+    /// The hinge's own angle, as last heard (shut until it speaks).
+    private var hingeDegrees: Double = 0
+
+    /// The pose the book is shown at.
+    var pose: FoldablePose {
+        lock.withLock { FoldablePose(hingeDegrees: hingeDegrees) }
+    }
 
     private let onPose: @Sendable () -> Void
 
@@ -51,8 +58,12 @@ final class RenderedFoldable: Screen, @unchecked Sendable {
         }
         // A silent hinge (the guest's motion stream can drop) still
         // gets a book: shut, as the device boots, until it speaks.
-        scene.update(hingeDegrees: hinge.angle()?.degrees ?? 0)
-        lock.withLock { isPosed = true }
+        let standing = hinge.angle()?.degrees ?? 0
+        lock.withLock {
+            hingeDegrees = standing
+            isPosed = true
+        }
+        scene.update(hingeDegrees: standing)
         do {
             try unfolded.start { [weak self] surface in
                 self?.take { FoldableScreens(unfolded: surface, cover: $0.cover) }
@@ -66,8 +77,11 @@ final class RenderedFoldable: Screen, @unchecked Sendable {
         }
         let watch = hinge.watch { [weak self] angle in
             guard let self else { return }
+            self.lock.withLock {
+                self.hingeDegrees = angle.degrees
+                self.isPosed = true
+            }
             self.scene.update(hingeDegrees: angle.degrees)
-            self.lock.withLock { self.isPosed = true }
             self.onPose()
             self.refresh()
         }

@@ -177,6 +177,32 @@ struct SharedHingeTests {
         verify(inner.hinge).angle().called(2)
     }
 
+    @Test func `folding sweeps from the angle last heard to the one asked for`() throws {
+        let inner = Inner()
+        let motor = MockHingeMotor()
+        given(motor).fold(from: .any, to: .any, over: .any).willReturn()
+        let shared = SharedHinge(inner: inner.hinge, motor: motor)
+        let w = shared.watch { _ in }
+        inner.onAngle?(HingeAngle(degrees: 130))
+
+        try shared.fold(to: 0, over: 0.8)
+
+        verify(motor).fold(from: .value(130), to: .value(0), over: .value(0.8)).called(1)
+        w.cancel()
+    }
+
+    @Test func `with no angle heard, a fold starts from shut`() throws {
+        let inner = Inner()
+        given(inner.hinge).angle().willReturn(nil)
+        let motor = MockHingeMotor()
+        given(motor).fold(from: .any, to: .any, over: .any).willReturn()
+        let shared = SharedHinge(inner: inner.hinge, motor: motor)
+
+        try shared.fold(to: 130, over: 0.8)
+
+        verify(motor).fold(from: .value(0), to: .value(130), over: .value(0.8)).called(1)
+    }
+
     /// The same device always gets the same shared hinge, whoever asks.
     @Test func `the registry hands out one shared hinge per device`() {
         let inner = Inner()

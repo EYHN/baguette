@@ -254,6 +254,62 @@
     });
   };
 
+  /**
+   * Device Hub's pose picker, under the book: shut, open (its 130°
+   * book pose) and flat. A pick moves the device's own hinge there —
+   * the server sweeps it as Device Hub would — and the book follows the
+   * hinge as it goes; the pose nearest the hinge lights up.
+   */
+  Sim3DPanel.prototype.placePosePicker = function (pose) {
+    if (!this.stage) return;
+    let host = this.stage.querySelector('[data-role="pose-picker"]');
+    if (!pose) { if (host) host.remove(); return; }
+    const POSES = [
+      { id: 'shut', degrees: 0, label: 'Closed', glyph: this.poseGlyph('shut') },
+      { id: 'open', degrees: 130, label: 'Open', glyph: this.poseGlyph('open') },
+      { id: 'flat', degrees: 180, label: 'Flat', glyph: this.poseGlyph('flat') },
+    ];
+    if (!host) {
+      host = document.createElement('div');
+      host.dataset.role = 'pose-picker';
+      host.className = 'r3d-pose-picker';
+      host.setAttribute('aria-label', 'Pose');
+      POSES.forEach((p) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.pose = p.id;
+        btn.title = p.label;
+        btn.setAttribute('aria-label', p.label);
+        btn.innerHTML = p.glyph;
+        btn.addEventListener('click', () => {
+          this.send({ type: 'set_pose', hingeDegrees: p.degrees });
+        });
+        host.appendChild(btn);
+      });
+      this.stage.appendChild(host);
+    }
+    // Nearest pose to the angle shown lights up.
+    const deg = Number(pose.hingeDegrees);
+    const nearest = POSES.reduce((a, b) =>
+      Math.abs(b.degrees - deg) < Math.abs(a.degrees - deg) ? b : a);
+    host.dataset.active = nearest.id;
+    host.querySelectorAll('[data-pose]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.pose === nearest.id);
+    });
+  };
+
+  /** Device Hub's three pose glyphs: a shut phone, an open book, a flat slab. */
+  Sim3DPanel.prototype.poseGlyph = function (id) {
+    const base = 'width="20" height="16" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"';
+    if (id === 'shut') {
+      return '<svg ' + base + '><rect x="6.5" y="1" width="7" height="14" rx="2"/></svg>';
+    }
+    if (id === 'open') {
+      return '<svg ' + base + '><path d="M2.5 3.5 L10 1.5 L17.5 3.5 V13.5 L10 14.5 L2.5 13.5 Z"/><path d="M10 1.5 V14.5"/></svg>';
+    }
+    return '<svg ' + base + '><rect x="1.5" y="2" width="17" height="12" rx="2"/></svg>';
+  };
+
   Sim3DPanel.prototype.start = function () {
     this.stop();
     if (!this.canvas || !this.model) return;
@@ -301,6 +357,7 @@
           this.screenQuad = pieces.length ? pieces : null;
           if (envelope.litPanel) this.litPanel = envelope.litPanel;
           this.placeButtons(Array.isArray(envelope.buttons) ? envelope.buttons : []);
+          this.placePosePicker(envelope.pose || null);
           return true;
         }
         if (envelope && envelope.type === 'gyro') {

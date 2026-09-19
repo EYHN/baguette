@@ -1601,6 +1601,20 @@
   }
   #simNativeView #native3DStage:hover .r3d-hw-button { opacity: 1; }
   #simNativeView .r3d-hw-button:active { background: #e2e8f0; }
+  /* Device Hub's pose picker, under the book. */
+  #simNativeView .r3d-pose-picker {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; gap: 4px; padding: 4px; border-radius: 99px; z-index: 6;
+    background: rgba(255, 255, 255, 0.94); border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 1px 6px rgba(15, 23, 42, 0.12);
+  }
+  #simNativeView .r3d-pose-picker button {
+    width: 34px; height: 26px; border: 0; border-radius: 99px; padding: 0;
+    background: transparent; color: #475569; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #simNativeView .r3d-pose-picker button:hover { background: rgba(15, 23, 42, 0.06); }
+  #simNativeView .r3d-pose-picker button.active { background: #dbeafe; color: #2563eb; }
   /* A booted foldable never shows the flat chrome: its view is the book. */
   #simNativeView #nativeDeviceFrame[data-foldable] { display: none; }
   /* Fixed 3D (a foldable's default view): straight on, no tools. */

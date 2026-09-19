@@ -75,6 +75,23 @@ struct RenderedFoldableTests {
         verify(scene).update(hingeDegrees: .value(120)).called(1)
     }
 
+    @Test func `the pose shown is the hinge's own angle`() throws {
+        let unfolded = MockScreen(), cover = MockScreen()
+        let hinge = MockHinge(), watch = MockHingeWatch()
+        let scene = MockDeviceScene()
+        var onAngle: ((HingeAngle) -> Void)?
+        given(unfolded).start(onFrame: .any).willReturn()
+        given(cover).start(onFrame: .any).willReturn()
+        given(hinge).angle().willReturn(HingeAngle(degrees: 130))
+        given(hinge).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
+        given(scene).update(hingeDegrees: .any).willReturn()
+        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, scene: scene)
+        try screen.start { _ in }
+        #expect(screen.pose == FoldablePose(hingeDegrees: 130))
+        onAngle?(HingeAngle(degrees: 42))
+        #expect(screen.pose == FoldablePose(hingeDegrees: 42))
+    }
+
     @Test func `the book is posed at the standing angle before any frame is composed`() throws {
         // A scene starts flat; a frame composed before the hinge has
         // spoken would show the book open when it is shut.

@@ -20,6 +20,7 @@ final class HostSubprocess: Subprocess, @unchecked Sendable {
         if let process, process.isRunning { process.terminate() }
         try? pipe?.fileHandleForReading.close()
         try? pipe?.fileHandleForWriting.close()
+        try? stdinPipe?.fileHandleForWriting.close()
     }
 
     func run(
@@ -37,6 +38,33 @@ final class HostSubprocess: Subprocess, @unchecked Sendable {
             standardInput: FileHandle.nullDevice, stdinData: nil,
             onBytes: onBytes, onExit: onExit
         )
+    }
+
+    private var stdinPipe: Pipe?
+
+    func runInteractive(
+        executable: URL,
+        arguments: [String],
+        onBytes: @escaping @Sendable (Data) -> Void,
+        onExit:  @escaping @Sendable (Int32) -> Void
+    ) throws {
+        let stdin = Pipe()
+        lock.lock()
+        stdinPipe = stdin
+        lock.unlock()
+        try run(
+            executable: executable, arguments: arguments,
+            standardInput: stdin, stdinData: nil,
+            onBytes: onBytes, onExit: onExit
+        )
+    }
+
+    func write(_ data: Data) throws {
+        lock.lock()
+        let pipe = stdinPipe
+        lock.unlock()
+        guard let pipe else { throw SubprocessError.notInteractive }
+        try pipe.fileHandleForWriting.write(contentsOf: data)
     }
 
     func run(

@@ -17,8 +17,16 @@ For releases prior to this changelog, see the
   plug-in — the model Device Hub draws) on the RealityKit pipeline,
   straight on, with both panels on the book's screens and the hinge
   posing it live. Clicks map through the lit screen's pieces, the
-  model's buttons are controls beside the device, and the book stands
-  the way the guest is held. Model definitions
+  model's buttons are controls beside the device, the rotate button
+  turns the book, and Device Hub's pose picker moves the device's own
+  hinge (`set_pose`).
+- **`baguette hinge`** and `POST /simulators/<udid>/hinge` fold iPhone
+  Duo — `--pose closed|open|flat` or `--angle`, swept over Device Hub's
+  0.8 s — through `HingeControl`, a guest-side executable (the first
+  non-dylib under `Injected/`) that reproduces the HID pose events
+  Device Hub's `dtuhidd` dispatches. `docs/features/hinge.md` records
+  the route. `Subprocess` gains `runInteractive` / `write` for a child
+  served commands on stdin. Model definitions
   gain `asset.xcodeResource`, `scene.restRotation`,
   `scene.textureRotation`, `scene.fold` and `scene.buttons`; the 3D
   socket's `screen_quad` gains `pieces`, `buttons` and `litPanel`, and

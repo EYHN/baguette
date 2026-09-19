@@ -30,9 +30,20 @@ final class SharedHinge: Hinge, @unchecked Sendable {
     /// move without Device Hub, and the new socket restarts the watch.
     static let gracePeriod: TimeInterval = 10
 
-    init(inner: any Hinge, now: @escaping () -> Date = { Date() }) {
+    private let motor: (any HingeMotor)?
+
+    init(inner: any Hinge, motor: (any HingeMotor)? = nil, now: @escaping () -> Date = { Date() }) {
         self.inner = inner
+        self.motor = motor
         self.now = now
+    }
+
+    /// A sweep starts where the hinge is — the angle last heard, or shut
+    /// when nothing has been heard, as the device boots.
+    func fold(to degrees: Double, over duration: TimeInterval) throws {
+        guard let motor else { throw HingeError.toolMissing }
+        let from = angle()?.degrees ?? 0
+        try motor.fold(from: from, to: degrees, over: duration)
     }
 
     // MARK: - registry
@@ -41,11 +52,13 @@ final class SharedHinge: Hinge, @unchecked Sendable {
     private static let registryLock = NSLock()
 
     /// The shared hinge for `udid`, made on first use.
-    static func forDevice(_ udid: String, make: () -> any Hinge) -> SharedHinge {
+    static func forDevice(
+        _ udid: String, make: () -> any Hinge, motor: @autoclosure () -> (any HingeMotor)? = nil
+    ) -> SharedHinge {
         registryLock.lock()
         defer { registryLock.unlock() }
         if let existing = registry[udid] { return existing }
-        let made = SharedHinge(inner: make())
+        let made = SharedHinge(inner: make(), motor: motor())
         registry[udid] = made
         return made
     }

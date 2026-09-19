@@ -373,7 +373,34 @@ A definition is rejected when:
 - dimensions are not positive;
 - a variant default does not name one of its choices;
 - a downloaded asset has no valid SHA-256;
-- neither a local file nor a download URL is present.
+- neither a local file, a download URL nor an Xcode resource is present;
+- a fold names no clip, a non-positive shut time or an open pose outside 0–180;
+- a texture rotation is not a quarter turn;
+- a button has no id or joint.
+
+### Foldables and Apple's own models
+
+iPhone Duo's definition ([`iphone-duo.md`](iphone-duo.md)) uses the
+optional keys a book needs:
+
+| Key | Meaning |
+|-----|---------|
+| `asset.xcodeResource` | The asset's path under the selected Xcode's `Contents/` (DeviceKit's `V68.usdz`); read in place, never copied |
+| `scene.restRotation` | Turns a model authored lying flat, screen up, to face the camera before any requested rotation |
+| `scene.textureRotation` | Quarter turns (degrees) the framebuffer needs on the mesh when its UVs run the other way |
+| `scene.fold` | `clip` (the shutting clip), `shutTime` (its time when shut; flat at 0), `coverMaterial`, `coverTextureSize`, `coverTextureRotation`, `openPoseDegrees` (Device Hub's open pose, from where up the bend is centred) |
+| `scene.buttons` | `[{id, joint}]` — the wire button name and the skeleton joint that sits on it; the page draws a control beside the device there |
+
+A foldable's 3D socket binds both panels and the hinge, poses the
+clip at `(180 − angle) / 180 · shutTime` and turns the whole device
+back by half the fold above the open pose (`FoldPose`); its
+`screen_quad` carries `pieces` (each with corners in framebuffer
+order and the `u`/`v` range it shows), `buttons` and `litPanel`, and
+`set_3d_camera` names the `orientation` the page turned the book to,
+and the scene rolls the model to stand that way (`InterfaceRoll`);
+`set_pose` moves the device's hinge (`hinge.md`) and `screen_quad`
+reports the `pose` shown;
+`set_3d_camera` may also name an `orientation` outright.
 
 ## Variants
 

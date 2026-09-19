@@ -18,7 +18,10 @@ for script in */build.sh; do
     name=$(dirname "$script")
     "./$script"
 
+    # A dylib to inject, or — HingeControl — an executable to spawn in
+    # the guest. Either way the product is named for its directory.
     dylib="$name/$name.dylib"
+    if [ ! -f "$dylib" ]; then dylib="$name/$name"; fi
 
     # clang exits 0 when its source glob matched nothing, emitting a valid
     # but symbol-less 16KB stub. That is not hypothetical: homebrew-core's

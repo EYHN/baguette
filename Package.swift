@@ -59,6 +59,10 @@ let package = Package(
                 // URLSession traffic from the condition baguette publishes.
                 // Same build-and-stage path, same installer.
                 .copy("Resources/VirtualNetwork"),
+                // HingeControl — not a dylib but an executable spawned in
+                // the guest (`simctl spawn`) to drive iPhone Duo's hinge.
+                // Same build-and-stage path, same installer.
+                .copy("Resources/HingeControl"),
             ],
             swiftSettings: [
                 // MOCKING is debug-only; release strips mock code entirely.

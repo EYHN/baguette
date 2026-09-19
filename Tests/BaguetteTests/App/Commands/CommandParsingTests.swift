@@ -20,12 +20,23 @@ struct CommandParsingTests {
             "tap", "double-tap", "swipe", "pinch", "pan", "press",
             "key", "type", "paste", "clipboard",
             "chrome", "screenshot", "record", "render-3d", "describe-ui", "logs", "serve",
-            "orientation", "shake", "status-bar", "location", "motion", "network",
+            "orientation", "hinge", "shake", "status-bar", "location", "motion", "network",
             "install", "add-media",
             "openurl", "schemes",
             "plugin", "bakery", "diag-digitizer-trackpad", "lifetime", "interface",
             "heal",
         ])
+    }
+
+    // MARK: - hinge
+
+    @Test func `hinge takes a pose or an angle, and a sweep duration`() throws {
+        let pose = try HingeCLICommand.parse(["--udid", "U", "--pose", "open"])
+        #expect(pose.pose == "open" && pose.angle == nil)
+        let angle = try HingeCLICommand.parse(["--udid", "U", "--angle", "95", "--duration", "1.2"])
+        #expect(angle.angle == "95" && angle.duration == "1.2")
+        let read = try HingeCLICommand.parse(["--udid", "U"])
+        #expect(read.pose == nil && read.angle == nil)
     }
 
     // MARK: - openurl / schemes

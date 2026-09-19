@@ -144,19 +144,87 @@ so `chrome.json`, `definition.json`, `bezel.png` and `chrome layout
 device that is folded or not booted. `describe-ui` frames come back in
 the lit panel's point space (`DisplayBinding.pointSize(scale:)`).
 
-### The page follows
+### The page shows the book, in 3D
 
-`sim.html` reads `/hinge` once at boot: on a foldable it takes the
-guest's orientation instead of forcing portrait (SpringBoard turns the
-open pose back to landscape the moment the home screen shows), then
-polls every 2 s and reloads when the lit panel or its orientation
-changes — the stream, bezel, tap space and rotation are all bound at
-boot, so a change means starting over. A phone answers `foldable:false`
-once and is never polled again.
+Device Hub does not draw the Duo with a 2D chrome at all. Its device
+view is `CoreDevicePopDeviceKitExtension`, a DeviceKit plug-in that
+renders Apple's own model of the device — `V68.usdz`, inside the
+plug-in's resources — with RealityKit: a skinned book (31 joints, the
+crease a run of 23 of them) whose clips `l_over_r`, `r_over_l` and
+`book_close` shut it, plus `power_button`, `volumeup_button`,
+`volumedown_button` and `photo_button` for the keys. Three of its
+materials are screens: `CvyXbAGXoolRUYl` (unfolded), `YqugYDOqMSOpqyA`
+(cover) and `AGmjnWHbZiRqzbR` (the cover camera). The flat chromes
+(`phone14` / `phone15`) are what the CLI's `chrome` verbs and the
+`bezel.png` routes still serve.
 
-Known cosmetic gap: `phone14`'s power button is anchored on the top
-edge and drawn from a wide image, so in the open pose it protrudes as a
-bar where Device Hub shows a nub. Positions match; the art does not.
+baguette's page does the same, on its existing RealityKit pipeline
+([`3d-rendering.md`](3d-rendering.md)). `Models3D/iphone-duo/
+definition.json` names the asset by its path inside the selected
+Xcode (`asset.xcodeResource` — read from Xcode the way the 2D chromes
+are read from `/Library/Developer/DeviceKit`, never copied), the two
+screen materials, the quarter turn the unfolded framebuffer needs on
+the mesh (`textureRotation: 270`), the rest rotation that stands the
+authored model up, the shutting clip and the joints that carry the
+buttons:
+
+```json
+"fold": {"clip": "l_over_r", "shutTime": 5.0,
+         "coverMaterial": "YqugYDOqMSOpqyA",
+         "coverTextureSize": {"width": 1398, "height": 2034},
+         "openPoseDegrees": 130}
+```
+
+A booted Duo's page opens the live 3D stream straight on (`fixed`:
+no orbiting, no stage tools; the cube button turns the book and sets
+it back) and never shows the flat chrome; a shut-down Duo still gets
+the flat chrome for its power card. The 3D socket binds **both**
+panels (`RenderedFoldable`) and the shared hinge, and poses the book
+from every sample (`FoldPose`): the clip runs from flat at its start
+to shut at `shutTime`, and because it raises the left half alone the
+whole device turns back by half the fold above the open pose — the
+centred bend Device Hub draws — handing over as the book shuts so the
+cover ends facing the camera. With no hinge reading the book is shown
+shut, as the device boots, until the hinge speaks.
+
+Input goes through `screen_quad` as on a phone, but a bent screen is
+not one quad: the server sends `pieces` — the two halves of the
+unfolded screen or the cover — each with its corners in the
+framebuffer's own order and the part of the buffer it shows
+(`FoldedScreenProjection`), so the page maps a click straight into
+framebuffer space without an orientation of its own. The model's
+buttons come along as `buttons` (`at` on the body, `control` beside
+it), and the page draws the controls where Device Hub does, shown
+while the pointer is on the stage; pressing one sends the ordinary
+`button` envelope.
+
+**Orientation.** The framebuffer maps onto the panel the way the
+panel is built, so whatever the guest draws — landscape-left in the
+open pose, portrait on the cover — reads right without the page
+knowing, and touches land in buffer space whatever the interface
+orientation. The book *stands* the way the page turns it: the
+rotate button rolls the model a quarter turn per step of the interface
+cycle (`InterfaceRoll`, measured against Device Hub: the unfolded
+panel in *Portrait Upside Down* stands the book with its left half
+up), as it turns a phone's flat chrome, and tells the guest the
+orientation it asked for. Nothing is read back — a rotation made in
+Device Hub is its own, and the page's button brings the two into step.
+
+**Pose picker.** Under the book sits Device Hub's picker — shut, open
+(130°), flat. A pick moves the device's own hinge there
+(`{"type":"set_pose","hingeDegrees":0}` on the 3D socket → `Hinge.fold`,
+swept over Device Hub's 0.8 s by `HingeControl` inside the guest — see
+[`hinge.md`](hinge.md)); SpringBoard swaps panels and the book follows
+the hinge samples as it goes. `screen_quad` carries `pose:
+{hingeDegrees}` so the nearest pose lights up.
+
+Known gaps: the hinge's motion stream can stop after a SpringBoard
+restart (`baguette heal`) — `devicectl` then reports nothing until
+Device Hub moves the pose — and the shared hinge remembers such
+silence for three seconds rather than making every caller wait it
+out. Framebuffer enumeration is serialised process-wide: SimulatorKit
+has raised `NSFileHandle … Bad file descriptor` out of two
+enumerations at once.
 
 ## Coordinates
 
@@ -167,38 +235,21 @@ space. `baguette chrome layout --udid <UDID>` reports the cover's
 
 ## Driving the hinge from baguette
 
-Not yet. Device Hub speaks to the guest over CoreDevice's `UniversalHID`
-— a Swift-only private framework that creates a virtual HID service
-from a descriptor and streams generic reports (`report type
-identifier 19` on service `0x1000013f5`, 60 Hz sweeps) — which baguette
-cannot call safely.
-
-What was proven to work, and is the shape a control would take: a
-~60-line shim injected into SpringBoard (the process that owns the
-pose) which swizzles `-[CMAngleManager startAngleUpdatesToQueue:handler:]`,
-keeps the handler, and feeds it `CMAngle`s fabricated with
-`initWithAngle:timestamp:continuousTimestamp:` — struct
-`{eventPhase, state, angleDegrees, mechanicalAngleDegrees, progress,
-velocity, angleValid, velocityValid}` (the two ints are in that order,
-the reverse of the ivars), `state < 3`, `eventPhase < 6`. Delivering 0°
-lit the cover and 180° lit the unfolded panel, reversibly; intermediate
-angles obey SpringBoard's own hysteresis and want a velocity sweep. It
-must **forward** to the original handler, or Device Hub's own hinge
-goes dead (that is what made Device Hub look inert during the first
-investigation). The cost is `launchctl setenv DYLD_INSERT_LIBRARIES` in
-the guest launchd plus a SpringBoard restart on first arm, which kills
-running apps. Not shipped: Device Hub already provides the control, and
-baguette following it covers the workflow.
+`baguette hinge --udid <UDID> --pose open` and `POST
+/simulators/<udid>/hinge` — see [`hinge.md`](hinge.md) for the route
+into the guest (`HingeControl`, the pose events Device Hub's `dtuhidd`
+dispatches, reproduced). The SpringBoard shim tried first (swizzling
+`CMAngleManager` to feed fabricated `CMAngle`s) worked too but needed an
+injected dylib and a SpringBoard restart; it is not shipped.
 
 ## What the beta cannot do yet
 
-- **Only two poses reach the simulator.** Apple's Duo guidance lists
-  six (closed, tent, open landscape, book, open portrait, laptop);
-  Device Hub's picker has three and drives closed (≈3°) and open
-  (≈130°). Nothing on the host sets an arbitrary angle — `simctl io
+- **Device Hub's picker has three poses**; Apple's Duo guidance lists
+  six (closed, tent, open landscape, book, open portrait, laptop).
+  `baguette hinge --angle` sets any angle 0–180; what SpringBoard makes
+  of the ones between is the runtime's business. `simctl io
   screenConfig` has only `power` and `geometry` (powering `primary-1`
-  on lights nothing; the guest's pose decides), and `devicectl device
-  simulate` offers biometrics / location / statusBar.
+  on lights nothing; the guest's pose decides).
 - **`describe-ui` in landscape** maps frames through a portrait point
   size, as it always has for a rotated iPhone; the open pose is
   landscape, so expect the same skew there.

@@ -553,6 +553,26 @@ struct Server: Sendable {
             }
             return Self.jsonResponse(json)
         }
+        // Move the hinge — Device Hub's pose picker, over HTTP:
+        // `?pose=closed|open|flat` or `?angle=<0–180>`, `&duration=<s>`.
+        // Blocks for the sweep (Device Hub's 0.8 s by default).
+        router.post("/simulators/:udid/hinge") { [simulators] r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            let q = r.uri.queryParameters
+            switch Self.driveHinge(
+                udid: Self.udidParam(r), pose: q.get("pose"), angle: q.get("angle"),
+                duration: q.get("duration"), simulators: simulators
+            ) {
+            case .ok:
+                return jsonOK
+            case .invalid(let reason):
+                return errorJSON(Self.hingeCommandMessage(reason), status: .badRequest)
+            case .unknownDevice:
+                return errorJSON("unknown udid: \(Self.udidParam(r))", status: .notFound)
+            case .failed(let error):
+                return errorJSON("hinge could not be driven: \(error)", status: .internalServerError)
+            }
+        }
         // Chrome / bezel — DeviceKit-sourced layout + rasterized PNG.
         router.get("/simulators/:udid/chrome.json") { [simulators, chromes] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
@@ -1525,6 +1545,50 @@ struct Server: Sendable {
         }
     }
 
+    enum HingeDriveOutcome: Equatable {
+        case ok
+        case invalid(HingeCommandError)
+        case unknownDevice
+        case failed(HingeError)
+    }
+
+    /// Pure dispatch for `POST /simulators/:udid/hinge` and the 3D
+    /// socket's `set_pose`: parse the pose or angle, find the device,
+    /// sweep its hinge. Blocks for the sweep.
+    static func driveHinge(
+        udid: String, pose: String?, angle: String?, duration: String?,
+        simulators: any Simulators
+    ) -> HingeDriveOutcome {
+        let command: HingeCommand
+        do {
+            command = try HingeCommand.parse(pose: pose, angle: angle, duration: duration)
+        } catch let error as HingeCommandError {
+            return .invalid(error)
+        } catch {
+            return .invalid(.missingTarget)
+        }
+        guard !udid.isEmpty, let sim = simulators.find(udid: udid) else {
+            return .unknownDevice
+        }
+        do {
+            try sim.hinge().fold(to: command.degrees, over: command.duration)
+            return .ok
+        } catch let error as HingeError {
+            return .failed(error)
+        } catch {
+            return .failed(.toolFailed(status: -1))
+        }
+    }
+
+    static func hingeCommandMessage(_ error: HingeCommandError) -> String {
+        switch error {
+        case .missingTarget: return "pose=closed|open|flat or angle=<0-180> is required"
+        case .unknownPose(let pose): return "unknown pose \(pose): expected closed, open or flat"
+        case .angleOutOfRange: return "angle must be a number from 0 to 180"
+        case .invalidDuration: return "duration must be a non-negative number of seconds"
+        }
+    }
+
     /// One hinge sample as the stream socket pushes it to the page.
     static func hingeMessage(_ angle: HingeAngle) -> String {
         #"{"type":"hinge","angleDegrees":\#(angle.degrees)}"#
@@ -1944,7 +2008,8 @@ struct Server: Sendable {
     /// and the part of the buffer it shows. Sent in `screen_quad`'s
     /// place whenever the pose or the camera changes.
     static func screenPiecesJSON(
-        _ pieces: [ScreenPiece], buttons: [ScreenButtonMark] = [], litPanel: IntegratedPanel? = nil
+        _ pieces: [ScreenPiece], buttons: [ScreenButtonMark] = [], litPanel: IntegratedPanel? = nil,
+        pose: FoldablePose? = nil
     ) -> String? {
         var object: [String: Any] = [
             "type": "screen_quad",
@@ -1966,6 +2031,7 @@ struct Server: Sendable {
             },
         ]
         if let litPanel { object["litPanel"] = litPanel == .primary ? "primary" : "secondary" }
+        if let pose { object["pose"] = ["hingeDegrees": pose.hingeDegrees] }
         guard let data = try? JSONSerialization.data(withJSONObject: object) else {
             return nil
         }
@@ -1974,9 +2040,10 @@ struct Server: Sendable {
 
     /// `screen_quad` for whatever the scene projects: a foldable's pieces
     /// when it has them, else the one quad.
-    static func screenPlacementJSON(_ scene: any DeviceScene) -> String? {
+    static func screenPlacementJSON(_ scene: any DeviceScene, pose: FoldablePose? = nil) -> String? {
         if let pieces = scene.screenPieces {
-            return screenPiecesJSON(pieces, buttons: scene.screenButtons ?? [], litPanel: scene.litPanel)
+            return screenPiecesJSON(
+                pieces, buttons: scene.screenButtons ?? [], litPanel: scene.litPanel, pose: pose)
         }
         if let quad = scene.screenQuad { return screenQuadJSON(quad) }
         return nil
@@ -2722,21 +2789,26 @@ struct Server: Sendable {
         let screen: any Screen
         let input: any Input
         let refresh: () -> Void
+        var foldable: RenderedFoldable?
         if plan.model.definition.scene.fold != nil {
             // A foldable: both panels on the book's two screens, the
             // hinge posing it; taps follow the lit panel as everywhere.
             let unfolded = sim.displays().panel(.secondary)
             let cover = sim.displays().panel(.primary)
+            final class Box: @unchecked Sendable { var book: RenderedFoldable? }
+            let box = Box()
             let book = RenderedFoldable(
                 unfolded: unfolded.screen(), cover: cover.screen(),
                 hinge: sim.hinge(), scene: scene,
                 onPose: {
                     // The lit screen moved: tell the page where it is.
-                    if let json = screenPlacementJSON(scene) {
+                    if let json = screenPlacementJSON(scene, pose: box.book?.pose) {
                         Task { try? await outbound.write(.text(json)) }
                     }
                 }
             )
+            box.book = book
+            foldable = book
             screen = book
             input = sim.input()
             refresh = { book.refresh() }
@@ -2769,7 +2841,7 @@ struct Server: Sendable {
             stream.stop()
         }
 
-        if let json = screenPlacementJSON(scene) {
+        if let json = screenPlacementJSON(scene, pose: foldable?.pose) {
             try? await outbound.write(.text(json))
         }
 
@@ -2783,8 +2855,23 @@ struct Server: Sendable {
                         scene: scene
                     ) {
                         refresh()
-                        if let json = screenPlacementJSON(scene) {
+                        if let json = screenPlacementJSON(scene, pose: foldable?.pose) {
                             try? await outbound.write(.text(json))
+                        }
+                        continue
+                    }
+                    // The pose picker: the device's own hinge is swept
+                    // there (a second or so, off this loop); the book
+                    // follows the hinge samples as it goes.
+                    if foldable != nil, let pose = try Device3DPose.parsing(json: Data(line.utf8)) {
+                        if case .fold(let degrees) = pose {
+                            let target = String(degrees)
+                            Task.detached {
+                                let outcome = Self.driveHinge(
+                                    udid: udid, pose: nil, angle: target, duration: nil,
+                                    simulators: simulators)
+                                if outcome != .ok { log("hinge: \(outcome)") }
+                            }
                         }
                         continue
                     }

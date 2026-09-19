@@ -8,3 +8,4 @@ DerivedData/
 # Build intermediates — `build.sh` stages the real copies into
 # Sources/Baguette/Resources/, which are the tracked ones.
 /Injected/*/*.dylib
+/Injected/HingeControl/HingeControl
