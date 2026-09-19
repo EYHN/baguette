@@ -14,12 +14,41 @@ struct ConnectedScreenRecord: Sendable, Equatable {
     let name: String
     let screenType: ScreenType
     let size: Size
+    /// CoreSimulator's own name for the panel — `primary`, `primary-1`,
+    /// `external-0`, `wireless0`, `resizable`. Empty when the output
+    /// predates the `Device Name:` line.
+    let deviceName: String
+
+    init(
+        screenId: UInt32,
+        name: String,
+        screenType: ScreenType,
+        size: Size,
+        deviceName: String = ""
+    ) {
+        self.screenId = screenId
+        self.name = name
+        self.screenType = screenType
+        self.size = size
+        self.deviceName = deviceName
+    }
 
     var isExternal: Bool {
         switch screenType {
         case .tvOut, .carPlay: return true
         case .integrated, .unknown: return false
         }
+    }
+
+    /// Whether this is the device's own panel.
+    ///
+    /// One Integrated screen used to mean one panel. A foldable (iPhone
+    /// Duo, iOS 27.1) lists two — the cover as `primary` and the larger
+    /// unfolded panel as `primary-1` — and the guest keeps the second
+    /// dark while folded, so "largest integrated" would bind a black
+    /// surface. The name settles it.
+    var isPrimaryPanel: Bool {
+        screenType == .integrated && deviceName == "primary"
     }
 }
 
@@ -46,11 +75,13 @@ enum SimctlIOEnumerate {
             let typeRaw = field(String.self, named: "Screen Type", in: body) ?? ""
             let screenType = ConnectedScreenRecord.ScreenType(rawValue: typeRaw) ?? .unknown
             let size = pixelSize(in: body) ?? Size(width: 0, height: 0)
+            let deviceName = field(String.self, named: "Device Name", in: body) ?? ""
             records.append(ConnectedScreenRecord(
                 screenId: screenId,
                 name: name,
                 screenType: screenType,
-                size: size
+                size: size,
+                deviceName: deviceName
             ))
         }
         return records

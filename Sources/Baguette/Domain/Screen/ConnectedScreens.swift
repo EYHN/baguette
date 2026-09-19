@@ -56,9 +56,18 @@ enum ConnectedScreens {
     /// any portrait port exists the largest one is the device. With none
     /// — nothing attached but a landscape iPad, say — largest area is
     /// still the best answer available.
+    ///
+    /// A foldable breaks shape too: iPhone Duo has two portrait
+    /// Integrated panels, and the larger one is the *unfolded* panel the
+    /// guest keeps dark while folded. Largest-portrait bound a black
+    /// surface. When Connected Screens marks a `primary` panel, that is
+    /// the device and shape is not consulted.
     private static func devicePort(
         in ports: [FramebufferPortSnapshot]
     ) -> FramebufferPortSnapshot? {
+        if let primary = ports.first(where: \.isPrimaryPanel) {
+            return primary
+        }
         let portrait = ports.filter { $0.size.height > $0.size.width }
         let pool = portrait.isEmpty ? ports : portrait
         return pool.max(by: { $0.area < $1.area })

@@ -7,13 +7,60 @@ import Testing
 @Suite("DisplayTouchTarget")
 struct DisplayTouchTargetTests {
 
-    @Test func `phone always uses the integrated digitizer constant`() {
+    /// With no panel bound — every single-panel device, where `input()`
+    /// never pays for a guest round-trip — the phone plane addresses the
+    /// built-in digitizer slot.
+    @Test func `phone uses the built-in digitizer slot when no panel is bound`() {
         let target = DisplayTouchTarget.resolve(
             kind: .phone,
-            connectedScreenId: 1,
+            connectedScreenId: nil,
             derive: { _ in 0xDEAD_BEEF }
         )
         #expect(target == IndigoHIDTouchTarget.phone)
+    }
+
+    // MARK: - foldable panels
+
+    /// `SimHIDVirtualServiceManager createDigitizerForTargetID:withDisplayUID:isBuiltIn:`
+    /// registers every panel's `ScreenTouchService` under the target the
+    /// host's create message carried — which it insists has "the
+    /// ScreenID mask bit": `0x40000000 | screenId`. That is the
+    /// `1073741825` (`0x40000001`) in the guest's published list, and it
+    /// is the cover panel's own digitizer, not an accident.
+    ///
+    /// A built-in panel is *also* stored into the `@50` (`0x32`) slot —
+    /// and `setBuiltInDigitizerService:` overwrites, so on iPhone Duo,
+    /// where the cover (screen 1) and unfolded (screen 3) digitizers are
+    /// both created built-in, `0x32` ends up on the second: the dark
+    /// panel. backboardd confirms it — a tap sent to `0x32` arrives on
+    /// `ACEFADE00000009`, the sender for screen 3's display UUID.
+    @Test func `a panel's own digitizer is its screen id under the mask bit`() {
+        #expect(IndigoHIDTouchTarget.panel(screenId: 1) == 0x4000_0001)
+        #expect(IndigoHIDTouchTarget.panel(screenId: 3) == 0x4000_0003)
+        #expect(IndigoHIDTouchTarget.panel(screenId: 1) == 1_073_741_825)
+    }
+
+    /// So on a foldable the phone plane addresses the bound panel's own
+    /// registration rather than the shared slot.
+    @Test func `phone addresses the bound panel's own digitizer`() {
+        #expect(
+            DisplayTouchTarget.resolve(
+                kind: .phone, connectedScreenId: 1, derive: { _ in nil }
+            ) == 0x4000_0001
+        )
+        #expect(
+            DisplayTouchTarget.resolve(
+                kind: .phone, connectedScreenId: 3, derive: { _ in nil }
+            ) == 0x4000_0003
+        )
+    }
+
+    /// The panel target is a registration, not a computation over any
+    /// screen: only Integrated screens get a create-digitizer message.
+    /// `0x40000002` — TVOut — is the one that took the guest down.
+    @Test func `the probe list holds the cover panel's own digitizer`() {
+        #expect(IndigoHIDTouchTarget.knownProbeTargets.contains(IndigoHIDTouchTarget.panel(screenId: 1)))
+        #expect(!IndigoHIDTouchTarget.knownProbeTargets.contains(0x4000_0002))
     }
 
     /// The external plane addresses the CarPlay **service**, which
@@ -87,9 +134,15 @@ struct DisplayTouchTargetTests {
     @Test func `an override never touches the phone plane`() {
         #expect(
             DisplayTouchTarget.resolve(
-                kind: .phone, connectedScreenId: 1,
+                kind: .phone, connectedScreenId: nil,
                 derive: { _ in nil }, override: 302
             ) == IndigoHIDTouchTarget.phone
+        )
+        #expect(
+            DisplayTouchTarget.resolve(
+                kind: .phone, connectedScreenId: 1,
+                derive: { _ in nil }, override: 302
+            ) == IndigoHIDTouchTarget.panel(screenId: 1)
         )
     }
 
@@ -141,12 +194,17 @@ struct DisplayTouchTargetTests {
         #expect(!IndigoHIDTouchTarget.knownProbeTargets.contains(0x4000_0002))
     }
 
+    /// Screen ids start at 1; a `0` is what the enumerate parser yields
+    /// for a record with none, and `0x40000000` on its own is registered
+    /// by nothing. Either way there is no panel to address.
     @Test func `phone is unaffected by the absent screen id`() {
-        let target = DisplayTouchTarget.resolve(
-            kind: .phone,
-            connectedScreenId: 0,
-            derive: { _ in nil }
-        )
-        #expect(target == IndigoHIDTouchTarget.phone)
+        for absent in [UInt32?.none, 0] {
+            let target = DisplayTouchTarget.resolve(
+                kind: .phone,
+                connectedScreenId: absent,
+                derive: { _ in nil }
+            )
+            #expect(target == IndigoHIDTouchTarget.phone)
+        }
     }
 }

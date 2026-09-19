@@ -76,12 +76,22 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
         }
     }
 
+    /// The device's own plane, bound before use.
+    ///
+    /// These used to open an unbound `SimulatorKitScreen` (largest
+    /// surface each tick) and an `IndigoHIDInput` on the built-in slot.
+    /// Both are right on a single-panel device and both are wrong on a
+    /// foldable: iPhone Duo's largest surface and its built-in slot are
+    /// the unfolded panel, dark while folded. Going through the phone
+    /// `Display` binds the panel Connected Screens names `primary` for
+    /// the framebuffer, and — only when there are several panels —
+    /// addresses that panel's own digitizer. See `SimulatorKitDisplay`.
     func screen() -> any Screen {
-        SimulatorKitScreen(udid: udid, host: host)
+        displays().phone.screen()
     }
 
     func input() -> any Input {
-        IndigoHIDInput(udid: udid, host: host)
+        displays().phone.input()
     }
 
     func displays() -> any Displays {

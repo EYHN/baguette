@@ -15,6 +15,22 @@ struct FramebufferPortSnapshot: Sendable, Equatable {
     let portName: String
     let connectedScreenId: UInt32?
     let size: Size
+    /// The port joined to the Connected Screen CoreSimulator names
+    /// `primary` — the device's own panel. See
+    /// `ConnectedScreenRecord.isPrimaryPanel`.
+    let isPrimaryPanel: Bool
+
+    init(
+        portName: String,
+        connectedScreenId: UInt32?,
+        size: Size,
+        isPrimaryPanel: Bool = false
+    ) {
+        self.portName = portName
+        self.connectedScreenId = connectedScreenId
+        self.size = size
+        self.isPrimaryPanel = isPrimaryPanel
+    }
 
     var area: Double { size.width * size.height }
 }

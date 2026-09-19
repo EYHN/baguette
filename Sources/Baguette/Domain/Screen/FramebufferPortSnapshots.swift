@@ -26,7 +26,8 @@ enum FramebufferPortSnapshots {
             return FramebufferPortSnapshot(
                 portName: port.portName,
                 connectedScreenId: screen.screenId,
-                size: port.size
+                size: port.size,
+                isPrimaryPanel: screen.isPrimaryPanel
             )
         }
     }

@@ -23,6 +23,55 @@ struct ConnectedScreensTests {
         size: Size(width: 100, height: 100)
     )
 
+    // MARK: - foldable
+
+    /// iPhone Duo (iOS 27.1) boots folded: the guest lights the cover
+    /// panel (`primary`, 1398×2034) and leaves the larger unfolded
+    /// panel (`primary-1`, 2007×2853) dark. Both are portrait and both
+    /// are Integrated, so largest-portrait binds a black surface — the
+    /// panel CoreSimulator names `primary` is the device.
+    private let coverPanel = FramebufferPortSnapshot(
+        portName: "com.apple.framebuffer.display",
+        connectedScreenId: 1,
+        size: Size(width: 1398, height: 2034),
+        isPrimaryPanel: true
+    )
+    private let unfoldedPanel = FramebufferPortSnapshot(
+        portName: "com.apple.framebuffer.display",
+        connectedScreenId: 3,
+        size: Size(width: 2007, height: 2853)
+    )
+
+    @Test func `phone binds the primary panel of a foldable, not the larger dark one`() throws {
+        let binding = try ConnectedScreens.binding(
+            kind: .phone,
+            ports: [unfoldedPanel, coverPanel]
+        )
+        #expect(binding.connectedScreenId == 1)
+        #expect(binding.size == coverPanel.size)
+    }
+
+    /// The second panel is portrait, so it is never mistaken for an
+    /// external either.
+    @Test func `a foldable's second panel does not bind as CarPlay`() {
+        #expect(throws: FramebufferSelectionError.noMatchingPort(.carPlay)) {
+            try ConnectedScreens.binding(
+                kind: .carPlay,
+                ports: [unfoldedPanel, coverPanel]
+            )
+        }
+    }
+
+    /// Without a mark — every device before the Duo, and older enumerate
+    /// output — shape still decides, exactly as before.
+    @Test func `without a marked panel the largest portrait port is still the phone`() throws {
+        let binding = try ConnectedScreens.binding(
+            kind: .phone,
+            ports: [overlayPort, phonePort, carPlayPort]
+        )
+        #expect(binding.connectedScreenId == 1)
+    }
+
     @Test func `phone binds the largest-area framebuffer port`() throws {
         let binding = try ConnectedScreens.binding(
             kind: .phone,

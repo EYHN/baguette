@@ -19,14 +19,36 @@ struct SimctlIOEnumerateTests {
             Screen ID: 1
             Name: LCD
             Unique ID: PurpleMain
+            Device Name: primary
             Screen Type: Integrated
             Pixel Size: {1206, 2622}
         (2) TVOut:
             Screen ID: 2
             Name: TVOut
             Unique ID: PurpleTVOut
+            Device Name: external-0
             Screen Type: TVOut
             Pixel Size: {720, 480}
+        """
+
+    /// iPhone Duo on iOS 27.1: two Integrated screens. The cover panel
+    /// is `primary`; the larger unfolded panel is `primary-1`.
+    private let foldableSample = """
+        Connected Screens:
+        (1) LCD:
+            Screen ID: 1
+            Name: LCD
+            Unique ID: 12181DAB-A25B-43FE-B650-F5F8F0662C48
+            Device Name: primary
+            Screen Type: Integrated
+            Pixel Size: {1398, 2034}
+        (3) LCD-1:
+            Screen ID: 3
+            Name: LCD-1
+            Unique ID: A68E892B-8EC1-4ECA-8A1B-88D080EAFFCD
+            Device Name: primary-1
+            Screen Type: Integrated
+            Pixel Size: {2007, 2853}
         """
 
     private let phoneOnlySample = """
@@ -69,5 +91,38 @@ struct SimctlIOEnumerateTests {
 
     @Test func `connectedCarPlay is nil when only the phone is connected`() {
         #expect(SimctlIOEnumerate.connectedCarPlay(from: phoneOnlySample) == nil)
+    }
+
+    // MARK: - panels
+
+    @Test func `connectedScreens parses the device name of each screen`() {
+        let screens = SimctlIOEnumerate.connectedScreens(from: connectedSample)
+        #expect(screens[0].deviceName == "primary")
+        #expect(screens[1].deviceName == "external-0")
+    }
+
+    /// A foldable lists two Integrated screens. Only the one CoreSimulator
+    /// names `primary` is the device's own panel; `primary-1` is the
+    /// second panel, which the guest leaves dark while folded.
+    @Test func `only the primary integrated screen is the device panel`() {
+        let screens = SimctlIOEnumerate.connectedScreens(from: foldableSample)
+        #expect(screens.count == 2)
+        #expect(screens[0].isPrimaryPanel)
+        #expect(!screens[1].isPrimaryPanel)
+        #expect(screens[1].screenType == .integrated)
+    }
+
+    /// An external is never the device panel, whatever it is called.
+    @Test func `an external screen is not the device panel`() {
+        let screens = SimctlIOEnumerate.connectedScreens(from: connectedSample)
+        #expect(!screens[1].isPrimaryPanel)
+    }
+
+    /// Older enumerate output without a Device Name line still parses;
+    /// it just cannot mark a panel, so callers fall back to shape.
+    @Test func `a screen without a device name is not marked as the panel`() {
+        let screens = SimctlIOEnumerate.connectedScreens(from: phoneOnlySample)
+        #expect(screens[0].deviceName == "")
+        #expect(!screens[0].isPrimaryPanel)
     }
 }

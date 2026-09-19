@@ -54,24 +54,33 @@ struct DeviceProfile: Equatable, Sendable {
     }
 
     /// Xcode 27's `capabilities.plist` → `capabilities.displays`, a list
-    /// describing every panel the device can drive. Only the
+    /// describing every panel the device can drive. Only an
     /// `integrated` entry is the device's own screen: the others are
     /// `tvOut` and `carPlay` (both 720×480) and a `scene` entry at
     /// 7680×4320 for resizable windows. Sizing a bezel off any of those
     /// would be silently, wildly wrong, so the type is matched
     /// explicitly rather than taking the first element.
+    ///
+    /// A foldable lists two `integrated` panels. iPhone Duo's cover is
+    /// `deviceName: primary` (1398×2034) and its unfolded panel is
+    /// `primary-1` (2007×2853); the guest boots folded and lights the
+    /// cover, so `primary` is the screen. Any integrated entry is the
+    /// fallback for the single-panel devices that predate the name.
     private static func parseIntegratedDisplay(_ data: Data) -> Size? {
         guard let raw = try? PropertyListSerialization.propertyList(
                   from: data, options: [], format: nil
               ),
               let root = raw as? [String: Any],
               let capabilities = root["capabilities"] as? [String: Any],
-              let displays = capabilities["displays"] as? [[String: Any]],
-              let panel = displays.first(where: {
-                  $0["displayType"] as? String == "integrated"
-              })
+              let displays = capabilities["displays"] as? [[String: Any]]
         else { return nil }
-        return parseDisplaySize(panel)
+        let integrated = displays.filter {
+            $0["displayType"] as? String == "integrated"
+        }
+        let panel = integrated.first(where: {
+            $0["deviceName"] as? String == "primary"
+        }) ?? integrated.first
+        return panel.flatMap(parseDisplaySize)
     }
 
     /// Same arithmetic as `parseScreenSize`, over the capabilities

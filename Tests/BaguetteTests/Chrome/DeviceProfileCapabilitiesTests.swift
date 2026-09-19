@@ -73,6 +73,42 @@ struct DeviceProfileCapabilitiesTests {
         )
     }
 
+    /// Mirrors iPhone Duo (iOS 27.1): two `integrated` panels. The
+    /// cover is `primary`; the larger unfolded one is `primary-1`, and
+    /// listed second here as it is on disk — but ordering is not the
+    /// rule, the name is, so the fixture also tries it first.
+    private func foldableCapabilities(unfoldedFirst: Bool) -> Data {
+        let cover: [String: Any] = [
+            "displayType": "integrated", "deviceName": "primary",
+            "displayName": "LCD",
+            "width": 1398, "height": 2034, "scale": 3,
+        ]
+        let unfolded: [String: Any] = [
+            "displayType": "integrated", "deviceName": "primary-1",
+            "displayName": "LCD-1",
+            "width": 2007, "height": 2853, "scale": 3,
+        ]
+        let plist: [String: Any] = [
+            "capabilities": [
+                "displays": unfoldedFirst ? [unfolded, cover] : [cover, unfolded]
+            ]
+        ]
+        return try! PropertyListSerialization.data(
+            fromPropertyList: plist, format: .binary, options: 0
+        )
+    }
+
+    @Test func `a foldable's screen size is the primary panel's`() throws {
+        for unfoldedFirst in [false, true] {
+            let profile = try DeviceProfile.parsing(
+                plistData: modernProfile(),
+                capabilitiesData: foldableCapabilities(unfoldedFirst: unfoldedFirst)
+            )
+            // 1398x2034 @3 — the cover, which is what the guest lights.
+            #expect(profile.screenSize == Size(width: 466, height: 678))
+        }
+    }
+
     @Test func `reads the screen size from the profile on Xcode 26`() throws {
         let profile = try DeviceProfile.parsing(
             plistData: legacyProfile(), capabilitiesData: nil

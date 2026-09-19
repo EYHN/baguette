@@ -10,6 +10,25 @@ For releases prior to this changelog, see the
 
 ## [Unreleased]
 
+### Added
+
+- **iPhone Duo (Xcode 27.1 beta, iOS 27.1).** The first foldable
+  simulator has two integrated panels and boots folded: the cover
+  (`primary`, 466×678 pt) is lit and the larger unfolded panel
+  (`primary-1`) is dark. baguette bound the dark one — `screenshot` /
+  `stream` / `serve` showed 2007×2853 of black, and every tap went to
+  its digitizer, because `0x32` turns out to be a slot the last
+  built-in panel created owns rather than the phone's own digitizer.
+  The phone plane now binds the Connected Screen CoreSimulator names
+  `primary` and, on a multi-panel device only, addresses that panel's
+  own `0x40000000 | screenId` registration (`0x40000001` — the number
+  the CarPlay work had filed as a near-miss). Single-panel devices take
+  the same path they always did, with no new guest round-trip; the Duo
+  pays one `simctl io enumerate` (~130 ms) per bind. `chrome layout`,
+  `describe-ui` and the 9-slice bezel size all report the cover.
+  Nothing in this beta unfolds the device — see
+  `docs/features/iphone-duo.md`.
+
 ---
 
 ## [0.1.98] - 2026-09-16
