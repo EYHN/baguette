@@ -17,8 +17,33 @@ import Foundation
 /// registered. It is never computed from a screen, a display id, or a
 /// plist.
 enum IndigoHIDTouchTarget {
-    /// Integrated phone digitizer (`0x32` — `50` in the list above).
+    /// The built-in digitizer slot (`0x32` — `50` in the list above).
+    ///
+    /// Not a digitizer of its own: `createDigitizerForTargetID:withDisplayUID:isBuiltIn:`
+    /// stores every *built-in* panel's service into this slot as well
+    /// as under its own target, and `setBuiltInDigitizerService:`
+    /// overwrites. One panel, one owner. A foldable creates two
+    /// built-in panels — iPhone Duo's cover (screen 1) then unfolded
+    /// (screen 3) — and the slot ends on the second, which is the dark
+    /// one while folded. For those, address the panel: `panel(screenId:)`.
     static let phone: UInt32 = 0x32
+
+    /// One integrated panel's own digitizer registration.
+    ///
+    /// The host's create-digitizer message carries `0x40000000 | screenId`
+    /// as its target — SimulatorHID refuses anything without "the
+    /// ScreenID mask bit" — and the guest keys the service on that raw
+    /// value. `1073741825` in the list above is screen 1's; it was read
+    /// as a near-miss when CarPlay was being found, and it is in fact
+    /// the cover panel's own digitizer.
+    ///
+    /// Still a registration, not a computation: only Integrated screens
+    /// get a create-digitizer message. Screen 2 is TVOut, so
+    /// `0x40000002` is the number that took the guest down. Pass only a
+    /// screen id that Connected Screens lists as Integrated.
+    static func panel(screenId: UInt32) -> UInt32 {
+        0x4000_0000 | screenId
+    }
 
     /// Every target the guest listed as known, for probing. Registered
     /// means safe to send to: a wrong one goes to the wrong surface,

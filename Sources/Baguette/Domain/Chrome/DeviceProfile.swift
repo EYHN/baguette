@@ -21,6 +21,62 @@ struct DeviceProfile: Equatable, Sendable {
     /// types carry them on 26, 0 of 124 on 27) and publishes the same
     /// values in a sibling `capabilities.plist` instead.
     let screenSize: Size?
+    /// A foldable's second panel, from `capabilities.plist`'s
+    /// `primary-1` display. `nil` on every single-panel device.
+    let secondaryPanel: PanelProfile?
+
+    /// One of the device's own panels: its DeviceKit chrome and its
+    /// screen in points. The primary is the profile itself; the
+    /// secondary exists only on a foldable, where the hinge decides
+    /// which of the two the bezel and the tap space describe.
+    struct PanelProfile: Equatable, Sendable {
+        let chromeIdentifier: String
+        let screenSize: Size?
+        /// The framebuffer mask CoreSimulator clips this panel with —
+        /// `/Library/Developer/DeviceKit/FramebufferMasks/<id>.pdf`.
+        /// The shape the simulator itself uses: iPhone Duo's cover has
+        /// near-square corners on the hinge side and round ones on the
+        /// outer edge, which `chrome.json`'s single radius cannot say.
+        /// `nil` when the profile names none (Xcode ≤26).
+        let framebufferMaskIdentifier: String?
+
+        init(chromeIdentifier: String, screenSize: Size?, framebufferMaskIdentifier: String? = nil) {
+            self.chromeIdentifier = chromeIdentifier
+            self.screenSize = screenSize
+            self.framebufferMaskIdentifier = framebufferMaskIdentifier
+        }
+    }
+
+    /// The primary panel's mask, from the `primary` (or only) integrated
+    /// display in `capabilities.plist`.
+    let framebufferMaskIdentifier: String?
+
+    var panels: [IntegratedPanel] {
+        secondaryPanel == nil ? [.primary] : [.primary, .secondary]
+    }
+
+    func panel(_ panel: IntegratedPanel) -> PanelProfile? {
+        switch panel {
+        case .primary:
+            return PanelProfile(
+                chromeIdentifier: chromeIdentifier, screenSize: screenSize,
+                framebufferMaskIdentifier: framebufferMaskIdentifier)
+        case .secondary:
+            return secondaryPanel
+        }
+    }
+
+    init(
+        chromeIdentifier: String,
+        screenSize: Size?,
+        secondaryPanel: PanelProfile? = nil,
+        framebufferMaskIdentifier: String? = nil
+    ) {
+        self.chromeIdentifier = chromeIdentifier
+        self.screenSize = screenSize
+        self.secondaryPanel = secondaryPanel
+        self.framebufferMaskIdentifier = framebufferMaskIdentifier
+    }
 
     static func parsing(
         plistData data: Data,
@@ -41,37 +97,53 @@ struct DeviceProfile: Equatable, Sendable {
             throw DeviceProfileParseError.missingChromeIdentifier
         }
 
-        let prefix = "com.apple.dt.devicekit.chrome."
-        let bare = fullID.hasPrefix(prefix)
-            ? String(fullID.dropFirst(prefix.count))
-            : fullID
+        let displays = capabilitiesData.flatMap(integratedDisplays) ?? []
+        let cover = displays.first { $0["deviceName"] as? String == "primary" } ?? displays.first
+        let unfolded = displays.first { $0["deviceName"] as? String == "primary-1" }
 
         return DeviceProfile(
-            chromeIdentifier: bare,
-            screenSize: parseScreenSize(dict)
-                ?? capabilitiesData.flatMap(parseIntegratedDisplay)
+            chromeIdentifier: bareChromeIdentifier(fullID),
+            screenSize: parseScreenSize(dict) ?? cover.flatMap(parseDisplaySize),
+            secondaryPanel: unfolded.flatMap { panel in
+                guard let id = panel["chromeIdentifier"] as? String else { return nil }
+                return PanelProfile(
+                    chromeIdentifier: bareChromeIdentifier(id),
+                    screenSize: parseDisplaySize(panel),
+                    framebufferMaskIdentifier: panel["framebufferMaskIdentifier"] as? String
+                )
+            },
+            framebufferMaskIdentifier: cover?["framebufferMaskIdentifier"] as? String
         )
+    }
+
+    private static func bareChromeIdentifier(_ fullID: String) -> String {
+        let prefix = "com.apple.dt.devicekit.chrome."
+        return fullID.hasPrefix(prefix) ? String(fullID.dropFirst(prefix.count)) : fullID
     }
 
     /// Xcode 27's `capabilities.plist` → `capabilities.displays`, a list
     /// describing every panel the device can drive. Only the
-    /// `integrated` entry is the device's own screen: the others are
+    /// `integrated` entries are the device's own screens: the others are
     /// `tvOut` and `carPlay` (both 720×480) and a `scene` entry at
     /// 7680×4320 for resizable windows. Sizing a bezel off any of those
     /// would be silently, wildly wrong, so the type is matched
     /// explicitly rather than taking the first element.
-    private static func parseIntegratedDisplay(_ data: Data) -> Size? {
+    ///
+    /// A foldable lists two `integrated` panels. iPhone Duo's cover is
+    /// `deviceName: primary` (1398×2034, `phone15`) and its unfolded
+    /// panel is `primary-1` (2007×2853, `phone14`). The cover is the
+    /// profile's own screen; the unfolded one is `secondaryPanel`. Any
+    /// integrated entry is the fallback for the single-panel devices
+    /// that predate the name.
+    private static func integratedDisplays(_ data: Data) -> [[String: Any]]? {
         guard let raw = try? PropertyListSerialization.propertyList(
                   from: data, options: [], format: nil
               ),
               let root = raw as? [String: Any],
               let capabilities = root["capabilities"] as? [String: Any],
-              let displays = capabilities["displays"] as? [[String: Any]],
-              let panel = displays.first(where: {
-                  $0["displayType"] as? String == "integrated"
-              })
+              let displays = capabilities["displays"] as? [[String: Any]]
         else { return nil }
-        return parseDisplaySize(panel)
+        return displays.filter { $0["displayType"] as? String == "integrated" }
     }
 
     /// Same arithmetic as `parseScreenSize`, over the capabilities

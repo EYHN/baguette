@@ -157,7 +157,7 @@ struct DeviceModelDefinitionTests {
     }
 }
 
-private extension DeviceModelDefinitionTests {
+extension DeviceModelDefinitionTests {
     static var macBook: Data { Data(macBookJSON.utf8) }
 
     static let macBookJSON = #"""

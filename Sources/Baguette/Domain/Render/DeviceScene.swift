@@ -12,6 +12,13 @@ protocol DeviceScene: AnyObject, Sendable {
     /// unencoded lets any existing stream codec consume it.
     func render(screen: IOSurface) throws -> IOSurface
 
+    /// A foldable: put each panel's latest frame on its screen and
+    /// return the composed scene, as `render(screen:)` does for a phone.
+    func render(screens: FoldableScreens) throws -> IOSurface
+
+    /// A foldable: pose the book at this hinge angle (`FoldPose`).
+    func update(hingeDegrees: Double)
+
     /// Mutate camera state without reloading the model or reconnecting.
     func update(camera: Device3DCamera)
 
@@ -25,4 +32,16 @@ protocol DeviceScene: AnyObject, Sendable {
     /// mapping browser clicks back onto the device screen without ray
     /// casting into the GPU scene. `nil` until the first render/update.
     var screenQuad: ScreenQuad? { get }
+
+    /// A foldable's lit screen as flat pieces in the rendered image
+    /// (`FoldedScreenProjection`), replacing `screenQuad`; nil on a
+    /// phone.
+    var screenPieces: [ScreenPiece]? { get }
+
+    /// Where the model's hardware buttons land in the rendered image,
+    /// for a model whose definition names them; nil otherwise.
+    var screenButtons: [ScreenButtonMark]? { get }
+
+    /// A foldable's lit panel at the current hinge angle; nil on a phone.
+    var litPanel: IntegratedPanel? { get }
 }

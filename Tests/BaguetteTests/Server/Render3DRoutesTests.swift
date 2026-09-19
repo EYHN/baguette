@@ -195,6 +195,39 @@ struct Render3DRoutesTests {
         #expect(object["type"] as? String == "screen_quad")
         #expect(corners == [[0.1, 0.2], [0.9, 0.2], [0.9, 0.8], [0.1, 0.8]])
     }
+
+    @Test func `a foldable's screen pieces each carry their corners and their part of the buffer`() throws {
+        let quad = ScreenQuad(
+            topLeft: NormalizedPoint(u: 0.1, v: 0.2),
+            topRight: NormalizedPoint(u: 0.5, v: 0.2),
+            bottomRight: NormalizedPoint(u: 0.5, v: 0.8),
+            bottomLeft: NormalizedPoint(u: 0.1, v: 0.8)
+        )
+        let pieces = [ScreenPiece(quad: quad, u: 0...1, v: 0.5...1)]
+        let buttons = [ScreenButtonMark(
+            id: "power", at: NormalizedPoint(u: 0.9, v: 0.3), control: NormalizedPoint(u: 0.95, v: 0.3))]
+
+        let json = try #require(Server.screenPiecesJSON(
+            pieces, buttons: buttons, litPanel: .primary,
+            pose: FoldablePose(hingeDegrees: 0)))
+        let object = try #require(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let encoded = try #require(object["pieces"] as? [[String: Any]])
+
+        #expect(object["type"] as? String == "screen_quad")
+        #expect(encoded.count == 1)
+        #expect(encoded[0]["corners"] as? [[Double]] == [[0.1, 0.2], [0.5, 0.2], [0.5, 0.8], [0.1, 0.8]])
+        #expect(encoded[0]["u"] as? [Double] == [0, 1])
+        #expect(encoded[0]["v"] as? [Double] == [0.5, 1])
+        let marks = try #require(object["buttons"] as? [[String: Any]])
+        #expect(marks[0]["id"] as? String == "power")
+        #expect(marks[0]["at"] as? [Double] == [0.9, 0.3])
+        #expect(marks[0]["control"] as? [Double] == [0.95, 0.3])
+        #expect(object["litPanel"] as? String == "primary")
+        let pose = try #require(object["pose"] as? [String: Any])
+        #expect(pose["hingeDegrees"] as? Double == 0)
+    }
 }
 
 private extension Render3DRoutesTests {

@@ -102,3 +102,16 @@ struct InjectedDylibInstallerApplyTests {
         #expect(before.contentModificationDate == after.contentModificationDate)
     }
 }
+
+// HingeControl is not a dylib to inject but an executable to spawn in
+// the guest; it ships and installs the same way, under its bare name.
+extension InjectedDylibInstallPlanTests {
+    @Test func `an executable ships under its bare name`() {
+        #expect(InjectedDylib.hingeControl.fileName == "HingeControl")
+        #expect(InjectedDylib.hingeControl.sourceTreePath == "Injected/HingeControl/HingeControl")
+        #expect(InjectedDylib.hingeControl.environmentOverride == "BAGUETTE_HINGECONTROL_TOOL")
+        let plan = InjectedDylibInstallPlan.compute(
+            bytes: Data("tool".utf8), supportDir: "/s", dylib: .hingeControl)
+        #expect(plan.destPath.hasSuffix("/HingeControl"))
+    }
+}

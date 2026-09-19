@@ -40,6 +40,52 @@ struct BezelRoutesTests {
         #expect(bytes == Data("BARE-PNG".utf8))
     }
 
+    // MARK: - explicit panel
+
+    /// With `?panel=` the route serves that panel's chrome regardless of
+    /// the hinge — the definition named it, and the URL must stay
+    /// stable for the browser cache to be right.
+    @Test func `bezelImage serves the named panel's chrome`() throws {
+        let (sim, chromes) = Self.fixture()
+        let unfolded = DeviceChromeAssets(
+            chrome: DeviceChrome(
+                identifier: "phone14",
+                screenInsets: Insets(top: 0, left: 0, bottom: 0, right: 0),
+                outerCornerRadius: 0, buttons: [], compositeImageName: "X"),
+            composite: ChromeImage(data: Data("UNFOLDED-PNG".utf8), size: Size(width: 1, height: 1)))
+        given(chromes as! MockChromes).assets(forDeviceName: .any, panel: .value(.secondary))
+            .willReturn(unfolded)
+        let bytes = Server.bezelImage(
+            udid: "UDID-1", simulators: Self.simulators(with: sim),
+            chromes: chromes, withButtons: true, panel: .secondary)
+        #expect(bytes == Data("UNFOLDED-PNG".utf8))
+        verify(sim as! MockSimulator).hinge().called(0)
+    }
+
+    @Test func `parsing the panel query accepts primary and secondary only`() {
+        #expect(Server.panelQuery("secondary") == .secondary)
+        #expect(Server.panelQuery("primary") == .primary)
+        #expect(Server.panelQuery(nil) == nil)
+        #expect(Server.panelQuery("inner") == nil)
+    }
+
+    // MARK: - screen mask
+
+    /// The lit panel's framebuffer mask, as the page's CSS mask.
+    @Test func `screenMaskImage returns the chrome's rasterized mask`() throws {
+        let (sim, chromes) = Self.fixture(screenMask: ChromeImage(
+            data: Data("MASK-PNG".utf8), size: Size(width: 466, height: 678)))
+        let bytes = Server.screenMaskImage(
+            udid: "UDID-1", simulators: Self.simulators(with: sim), chromes: chromes)
+        #expect(bytes == Data("MASK-PNG".utf8))
+    }
+
+    @Test func `screenMaskImage is nil when the chrome carries no mask`() throws {
+        let (sim, chromes) = Self.fixture()
+        #expect(Server.screenMaskImage(
+            udid: "UDID-1", simulators: Self.simulators(with: sim), chromes: chromes) == nil)
+    }
+
     @Test func `applyOrientation routes a valid value through the simulator's orientation surface`() {
         let host = MockSimulators()
         let sim = MockSimulator()
@@ -115,6 +161,7 @@ struct BezelRoutesTests {
 
     @Test func `bezelImage returns nil for an unknown udid`() {
         let chromes = MockChromes()
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         let sims = MockSimulators()
         given(sims).find(udid: .value("ghost")).willReturn(nil)
 
@@ -173,6 +220,7 @@ struct BezelRoutesTests {
         let sims = MockSimulators()
         given(sims).find(udid: .value("ghost")).willReturn(nil)
         let chromes = MockChromes()
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         #expect(Server.definitionJSONString(
             udid: "ghost", simulators: sims, chromes: chromes
         ) == nil)
@@ -194,8 +242,8 @@ struct BezelRoutesTests {
 
         let screen = try #require(parsed["screen"] as? [String: Any])
         let bezel  = try #require(screen["bezelImage"] as? [String: Any])
-        #expect(bezel["rest"] as? String == "/simulators/UDID-1/bezel.png")
-        #expect(bezel["bare"] as? String == "/simulators/UDID-1/bezel.png?buttons=false")
+        #expect(bezel["rest"] as? String == "/simulators/UDID-1/bezel.png?panel=primary")
+        #expect(bezel["bare"] as? String == "/simulators/UDID-1/bezel.png?buttons=false&panel=primary")
 
         let buttons = try #require(parsed["buttons"] as? [[String: Any]])
         #expect(buttons.count == 1)
@@ -204,7 +252,7 @@ struct BezelRoutesTests {
         let envelope = try #require(power["envelope"] as? [String: String])
         #expect(envelope == ["type": "button", "button": "power"])
         let images = try #require(power["images"] as? [String: String])
-        #expect(images["rest"] == "/simulators/UDID-1/chrome-button/power.png")
+        #expect(images["rest"] == "/simulators/UDID-1/chrome-button/power.png?panel=primary")
     }
 
     @Test func `chromeJSONString includes imageUrl per button under the per-udid prefix`() throws {
@@ -233,7 +281,7 @@ private extension BezelRoutesTests {
     /// One-shot fixture: a booted simulator whose chrome carries one
     /// button (`power`) plus distinct merged + bare composites
     /// so byte equality alone proves which path was taken.
-    static func fixture() -> (any Simulator, any Chromes) {
+    static func fixture(screenMask: ChromeImage? = nil) -> (any Simulator, any Chromes) {
         let chrome = DeviceChrome(
             identifier: "phone11",
             screenInsets: Insets(top: 0, left: 0, bottom: 0, right: 0),
@@ -263,10 +311,13 @@ private extension BezelRoutesTests {
                     data: Data("POWER-PNG".utf8),
                     size: Size(width: 10, height: 30)
                 ),
-            ]
+            ],
+            screenMask: screenMask
         )
 
         let chromes = MockChromes()
+
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         given(chromes).assets(forDeviceName: .any).willReturn(assets)
 
         let sim = MockSimulator()

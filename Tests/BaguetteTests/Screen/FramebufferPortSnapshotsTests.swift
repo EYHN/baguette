@@ -44,6 +44,54 @@ struct FramebufferPortSnapshotsTests {
         #expect(snapshots[1].size == Size(width: 800, height: 480))
     }
 
+    /// The port itself has no idea which panel it is; the name comes
+    /// from the Connected Screens record it joins to.
+    @Test func `carries the panel from the matched screen onto the port`() {
+        let ports = [
+            SizedFramebufferPort(
+                portName: "com.apple.framebuffer.display",
+                size: Size(width: 2007, height: 2853)
+            ),
+            SizedFramebufferPort(
+                portName: "com.apple.framebuffer.display",
+                size: Size(width: 1398, height: 2034)
+            ),
+        ]
+        let screens = [
+            ConnectedScreenRecord(
+                screenId: 1, name: "LCD", screenType: .integrated,
+                size: Size(width: 1398, height: 2034), deviceName: "primary"
+            ),
+            ConnectedScreenRecord(
+                screenId: 3, name: "LCD-1", screenType: .integrated,
+                size: Size(width: 2007, height: 2853), deviceName: "primary-1",
+                uiOrientation: .landscapeLeft
+            ),
+        ]
+
+        let snapshots = FramebufferPortSnapshots.assigningScreenIds(
+            ports: ports, screens: screens
+        )
+
+        #expect(snapshots[0].connectedScreenId == 3)
+        #expect(snapshots[0].panel == .secondary)
+        #expect(snapshots[0].orientation == .landscapeLeft)
+        #expect(snapshots[1].orientation == nil)
+        #expect(snapshots[1].connectedScreenId == 1)
+        #expect(snapshots[1].panel == .primary)
+    }
+
+    @Test func `a port with no matched screen is not a panel`() {
+        let snapshots = FramebufferPortSnapshots.assigningScreenIds(
+            ports: [SizedFramebufferPort(
+                portName: "com.apple.framebuffer.display",
+                size: Size(width: 100, height: 100)
+            )],
+            screens: []
+        )
+        #expect(snapshots[0].panel == nil)
+    }
+
     @Test func `leaves screen id nil when no connected screens remain to match`() {
         let ports = [
             SizedFramebufferPort(

@@ -1,0 +1,42 @@
+import Foundation
+
+/// A request to move the hinge: Device Hub's three poses by name, or an
+/// angle, swept over a duration.
+struct HingeCommand: Equatable, Sendable {
+    let degrees: Double
+    let duration: TimeInterval
+
+    /// Device Hub's poses, as `devicectl` reads them back.
+    static let poses: [String: Double] = ["closed": 0, "open": 130, "flat": 180]
+    /// Device Hub's own sweep: 0.5–0.85 s, ease-out.
+    static let defaultDuration: TimeInterval = 0.8
+
+    static func parse(pose: String?, angle: String?, duration: String?) throws -> HingeCommand {
+        let degrees: Double
+        if let pose {
+            guard let known = poses[pose] else { throw HingeCommandError.unknownPose(pose) }
+            degrees = known
+        } else if let angle {
+            guard let value = Double(angle), value.isFinite else { throw HingeCommandError.angleOutOfRange }
+            guard (0...180).contains(value) else { throw HingeCommandError.angleOutOfRange }
+            degrees = value
+        } else {
+            throw HingeCommandError.missingTarget
+        }
+        var seconds = defaultDuration
+        if let duration {
+            guard let value = Double(duration), value.isFinite, value >= 0 else {
+                throw HingeCommandError.invalidDuration
+            }
+            seconds = value
+        }
+        return HingeCommand(degrees: degrees, duration: seconds)
+    }
+}
+
+enum HingeCommandError: Error, Equatable {
+    case missingTarget
+    case unknownPose(String)
+    case angleOutOfRange
+    case invalidDuration
+}

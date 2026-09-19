@@ -20,6 +20,7 @@ final class HostSubprocess: Subprocess, @unchecked Sendable {
         if let process, process.isRunning { process.terminate() }
         try? pipe?.fileHandleForReading.close()
         try? pipe?.fileHandleForWriting.close()
+        try? stdinPipe?.fileHandleForWriting.close()
     }
 
     func run(
@@ -37,6 +38,33 @@ final class HostSubprocess: Subprocess, @unchecked Sendable {
             standardInput: FileHandle.nullDevice, stdinData: nil,
             onBytes: onBytes, onExit: onExit
         )
+    }
+
+    private var stdinPipe: Pipe?
+
+    func runInteractive(
+        executable: URL,
+        arguments: [String],
+        onBytes: @escaping @Sendable (Data) -> Void,
+        onExit:  @escaping @Sendable (Int32) -> Void
+    ) throws {
+        let stdin = Pipe()
+        lock.lock()
+        stdinPipe = stdin
+        lock.unlock()
+        try run(
+            executable: executable, arguments: arguments,
+            standardInput: stdin, stdinData: nil,
+            onBytes: onBytes, onExit: onExit
+        )
+    }
+
+    func write(_ data: Data) throws {
+        lock.lock()
+        let pipe = stdinPipe
+        lock.unlock()
+        guard let pipe else { throw SubprocessError.notInteractive }
+        try pipe.fileHandleForWriting.write(contentsOf: data)
     }
 
     func run(
@@ -96,7 +124,17 @@ final class HostSubprocess: Subprocess, @unchecked Sendable {
 
         pipe.fileHandleForReading.readabilityHandler = { handle in
             let bytes = handle.availableData
-            if !bytes.isEmpty { onBytes(bytes) }
+            if bytes.isEmpty {
+                // End of file. Foundation keeps invoking the handler with
+                // nothing for as long as one is installed — a busy loop
+                // that pinned `serve` at 100% once children that exit on
+                // their own (one-shot `simctl`, a `devicectl` monitor's
+                // timeout) had long-lived owners. The exit itself still
+                // arrives through `terminationHandler`.
+                handle.readabilityHandler = nil
+                return
+            }
+            onBytes(bytes)
         }
         process.terminationHandler = { proc in
             onExit(proc.terminationStatus)
@@ -119,6 +157,14 @@ final class HostSubprocess: Subprocess, @unchecked Sendable {
                 try? handle.close()
             }
         }
+    }
+
+    /// Whether the child's output is still being read — false once the
+    /// pipe reached end-of-file or the child was terminated. For tests.
+    var isReading: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return pipe?.fileHandleForReading.readabilityHandler != nil
     }
 
     func terminate() {

@@ -6,6 +6,10 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
     private let udid: String
     private let host: any DeviceHost
     private let enumerateIO: () throws -> String
+    private let hinge: any Hinge
+    /// When set, the lit panel is this one and the hinge is not asked —
+    /// see `Displays.panel(_:)`.
+    private let pinnedPanel: IntegratedPanel?
     private let lock = NSLock()
     private var cached: DisplayBinding?
 
@@ -13,14 +17,21 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
         kind: DisplayKind,
         udid: String,
         host: any DeviceHost,
-        enumerateIO: @escaping () throws -> String
+        enumerateIO: @escaping () throws -> String,
+        hinge: any Hinge,
+        pinnedPanel: IntegratedPanel? = nil
     ) {
         self.kind = kind
         self.udid = udid
         self.host = host
         self.enumerateIO = enumerateIO
+        self.hinge = hinge
+        self.pinnedPanel = pinnedPanel
     }
 
+    /// Binds the plane. On a foldable this also asks the hinge which
+    /// panel is lit (~0.3 s through devicectl); a single-panel device
+    /// never pays that, since it has nothing to choose between.
     func resolve() throws -> DisplayBinding {
         let sized = try SimulatorKitFramebufferPorts.sizedPorts(udid: udid, host: host)
         let screens = SimctlIOEnumerate.connectedScreens(from: try enumerateIO())
@@ -28,7 +39,9 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
             ports: sized,
             screens: screens
         )
-        let binding = try ConnectedScreens.binding(kind: kind, ports: ports)
+        let litPanel: IntegratedPanel = pinnedPanel
+            ?? (IntegratedPanels.several(in: sized) ? (hinge.angle()?.litPanel ?? .primary) : .primary)
+        let binding = try ConnectedScreens.binding(kind: kind, ports: ports, litPanel: litPanel)
         lock.lock()
         cached = binding
         lock.unlock()
@@ -43,32 +56,49 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
         return SimulatorKitScreen(udid: udid, host: host, binding: binding)
     }
 
-    /// Input for this plane, resolved once.
+    /// Input for this plane.
     ///
-    /// There was a version of this that re-derived the target on every
-    /// gesture, to stop a session dispatching to a screen that had gone
-    /// away. It is gone, and deliberately: a target is a **constant**
-    /// naming a registered service (`IndigoHIDTouchTarget`), not
-    /// anything derived from a screen, so there is nothing about it that
-    /// can go stale. What that version actually bought was a
-    /// `simctl io enumerate` subprocess plus a SimulatorKit port walk in
-    /// front of every touch — including every move of a drag — which is
-    /// exactly as slow as it sounds.
+    /// A target is a **registration** — the key some create-service
+    /// message stored a service under — so nothing about it goes stale
+    /// and it is not re-derived per gesture. (There was a version that
+    /// did, putting a `simctl io enumerate` subprocess in front of every
+    /// move of a drag. It is gone.) Dispatching to a panel that has since
+    /// detached is harmless: the service stays registered and the event
+    /// lands nowhere. Only an *unregistered* target kills the guest, and
+    /// this cannot produce one: the built-in slot is always there, and a
+    /// panel id only comes from a Connected Screens record marked
+    /// Integrated.
     ///
-    /// Dispatching to a display that has since detached is now harmless:
-    /// the service is still registered, so the event is delivered
-    /// nowhere rather than throwing. Unregistered targets are what kill
-    /// the guest, and this cannot produce one.
+    /// Which registration the phone plane addresses depends on how many
+    /// panels the device has — see `boundPanelScreenId`.
     func input() -> any Input {
         let target = DisplayTouchTarget.resolve(
             kind: kind,
-            connectedScreenId: 0,
+            connectedScreenId: boundPanelScreenId(),
             derive: { _ in nil },
             override: DisplayTouchTarget.parseOverride(
                 ProcessInfo.processInfo.environment["BAGUETTE_CARPLAY_TARGET"]
             )
         ) ?? IndigoHIDTouchTarget.phone
         return IndigoHIDInput(udid: udid, host: host, touchTarget: target, plane: kind)
+    }
+
+    /// The phone plane's panel, when the device has more than one.
+    ///
+    /// A foldable's panels are all created built-in, and they share the
+    /// built-in digitizer slot `0x32` — last one created owns it, which
+    /// on iPhone Duo is the unfolded panel. Only there is the *lit*
+    /// panel's own registration worth the round-trips (`simctl io
+    /// enumerate` ~130 ms, the hinge ~300 ms). One panel — every other
+    /// device — is answered by the in-process port walk alone and keeps
+    /// the slot, so a one-shot tap pays nothing new.
+    private func boundPanelScreenId() -> UInt32? {
+        guard kind == .phone,
+              let sized = try? SimulatorKitFramebufferPorts.sizedPorts(udid: udid, host: host),
+              IntegratedPanels.several(in: sized),
+              let binding = try? resolve()
+        else { return nil }
+        return binding.connectedScreenId
     }
 
     private func cachedBinding() -> DisplayBinding? {

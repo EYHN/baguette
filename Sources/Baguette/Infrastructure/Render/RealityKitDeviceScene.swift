@@ -24,13 +24,41 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private var wrapper: Entity!
     private var cameraEntity: PerspectiveCamera!
     private var cameraFraming: DeviceCameraFraming!
-    private var screenEntity: ModelEntity!
-    private var screenMaterialIndex: Int = 0
-    private var screenTexture: LowLevelTexture?
-    private var screenSourceSize: RenderDimensions?
-    private var screenContentRegion: ContentRegion?
+    /// One screen of the model: the mesh and material slot the simulator
+    /// frames land on, and the streaming texture sized to those frames.
+    private struct ScreenSlot {
+        let entity: ModelEntity
+        let materialIndex: Int
+        let textureSize: RenderDimensions
+        var texture: LowLevelTexture?
+        var sourceSize: RenderDimensions?
+        var contentRegion: ContentRegion?
+    }
+    private var screen: ScreenSlot!
+    /// A foldable's cover, on the far side of the leaf that folds over.
+    private var coverScreen: ScreenSlot?
+    /// Between the wrapper (the requested rotation) and the model: the
+    /// authored rest rotation, and a foldable's centring turn.
+    private var rest: Entity!
+    private var restOrientation = simd_quatf(angle: 0, axis: [0, 1, 0])
+    private var foldController: AnimationPlaybackController?
     private var screenLocalCorners: ScreenLocalCorners!
+    private var coverLocalCorners: ScreenLocalCorners?
+    private var hingeDegrees: Double = 180
+    private var view = Device3DCamera(rotation: .zero, zoom: 1)
+    /// The interface orientation the page last asked the guest for; nil
+    /// means the usual: the unfolded panel landscape-left, the cover
+    /// portrait. Not read back from the guest — the page's rotate
+    /// button turns the book, as it turns a phone's chrome.
+    private var interfaceOrientation: DeviceOrientation?
     private(set) var screenQuad: ScreenQuad?
+    private(set) var screenPieces: [ScreenPiece]?
+    private var buttonAnchors: [ScreenButtonAnchor] = []
+    private var bodyExtents = Vector3(x: 0, y: 0, z: 0)
+    private(set) var screenButtons: [ScreenButtonMark]?
+    var litPanel: IntegratedPanel? {
+        plan.model.definition.scene.fold == nil ? nil : HingeAngle(degrees: hingeDegrees).litPanel
+    }
     private var renderTargets: MetalRenderTargetRing!
     private var metalDevice: (any MTLDevice)!
     private var commandQueue: (any MTLCommandQueue)!
@@ -67,21 +95,121 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
 
     func render(screen surface: IOSurface) throws -> IOSurface {
         try Self.onMain {
-            try self.renderFrame(surface)
+            try self.paint(&self.screen, with: surface)
+            return try self.renderScene()
+        }
+    }
+
+    func render(screens: FoldableScreens) throws -> IOSurface {
+        try Self.onMain {
+            if let surface = screens.unfolded {
+                try self.paint(&self.screen, with: surface)
+            }
+            if let surface = screens.cover, self.coverScreen != nil {
+                try self.paint(&self.coverScreen!, with: surface)
+            }
+            return try self.renderScene()
+        }
+    }
+
+    /// Pose the book: the shutting clip at the angle's time, the whole
+    /// device turned back to centre the bend (`FoldPose`).
+    func update(hingeDegrees: Double) {
+        Self.onMain {
+            guard let fold = self.plan.model.definition.scene.fold,
+                  let controller = self.foldController else { return }
+            let pose = FoldPose.at(degrees: hingeDegrees, fold: fold)
+            controller.time = pose.clipTime
+            controller.pause()
+            self.rest.orientation = simd_quatf(
+                angle: Self.radians(pose.yawDegrees), axis: [0, 1, 0]
+            ) * self.restOrientation
+            // Keep the book in the middle as it folds, as Device Hub does.
+            let shift = self.centring(at: hingeDegrees)
+            self.rest.position = SIMD3<Float>(Float(shift.x), Float(shift.y), Float(shift.z))
+            self.hingeDegrees = hingeDegrees
+            self.wrapper.orientation = Self.orientation(self.effectiveRotation)
+            self.screenPieces = self.projectedScreenPieces()
+            self.screenButtons = self.projectedScreenButtons()
         }
     }
 
     func update(camera requested: Device3DCamera) {
         Self.onMain {
-            self.wrapper.orientation = Self.orientation(requested.rotation)
+            self.view = requested
+            if let orientation = requested.orientation { self.interfaceOrientation = orientation }
+            self.wrapper.orientation = Self.orientation(self.effectiveRotation)
             self.cameraEntity.position.z = Float(
                 self.cameraFraming.distance(at: requested.zoom)
             )
             self.screenQuad = self.projectedScreenQuad(
-                rotation: requested.rotation,
+                rotation: self.effectiveRotation,
                 zoom: requested.zoom
             )
+            self.screenPieces = self.projectedScreenPieces()
+            self.screenButtons = self.projectedScreenButtons()
         }
+    }
+
+    /// The requested rotation with a foldable's interface roll on top:
+    /// the book stands the way the guest is held (`InterfaceRoll`).
+    @MainActor
+    private var effectiveRotation: DeviceRotation {
+        guard plan.model.definition.scene.fold != nil, let lit = litPanel else { return view.rotation }
+        let orientation = interfaceOrientation ?? (lit == .secondary ? .landscapeLeft : .portrait)
+        let roll = InterfaceRoll.degrees(orientation, litPanel: lit)
+        return DeviceRotation(x: view.rotation.x, y: view.rotation.y, z: view.rotation.z + roll)
+    }
+
+    @MainActor
+    private func centring(at degrees: Double) -> Vector3 {
+        guard let fold = plan.model.definition.scene.fold, let corners = screenLocalCorners else {
+            return Vector3(x: 0, y: 0, z: 0)
+        }
+        return FoldPose.centring(inner: corners, hingeDegrees: degrees, fold: fold)
+    }
+
+    @MainActor
+    private func projectedScreenButtons() -> [ScreenButtonMark]? {
+        guard let fold = plan.model.definition.scene.fold, !buttonAnchors.isEmpty else { return nil }
+        return FoldedScreenProjection.buttons(
+            buttonAnchors,
+            body: bodyExtents,
+            margin: max(bodyExtents.x, bodyExtents.y) * 0.06,
+            hingeDegrees: hingeDegrees,
+            fold: fold,
+            rotation: effectiveRotation,
+            offset: centring(at: hingeDegrees),
+            distance: cameraFraming.distance(at: view.zoom),
+            fieldOfViewDegrees: cameraFraming.fieldOfViewDegrees,
+            aspect: Double(plan.outputSize.width) / Double(plan.outputSize.height)
+        )
+    }
+
+    /// A foldable's lit screen in the output image at the current hinge
+    /// angle and camera. The unfolded panel's buffer lies landscape-left
+    /// on its mesh and the cover's portrait.
+    @MainActor
+    private func projectedScreenPieces() -> [ScreenPiece]? {
+        guard let fold = plan.model.definition.scene.fold,
+              let coverLocalCorners else { return nil }
+        let lit = HingeAngle(degrees: hingeDegrees).litPanel
+        return FoldedScreenProjection.pieces(
+            inner: screenLocalCorners,
+            cover: coverLocalCorners,
+            litPanel: lit,
+            // How the panel's buffer lies on the mesh — fixed by the
+            // hardware, not by what the guest draws: touches land in
+            // buffer space whatever the interface orientation.
+            orientation: lit == .secondary ? .landscapeLeft : .portrait,
+            hingeDegrees: hingeDegrees,
+            fold: fold,
+            rotation: effectiveRotation,
+            offset: centring(at: hingeDegrees),
+            distance: cameraFraming.distance(at: view.zoom),
+            fieldOfViewDegrees: cameraFraming.fieldOfViewDegrees,
+            aspect: Double(plan.outputSize.width) / Double(plan.outputSize.height)
+        )
     }
 
     func update(pose: Attitude, zoom: Double) {
@@ -147,10 +275,41 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
                 definition.scene.screenNode ?? definition.scene.screenMaterial
             )
         }
-        screenEntity = screen
-        screenMaterialIndex = screen.model?.materials.firstIndex {
-            $0.name == definition.scene.screenMaterial
-        } ?? 0
+        self.screen = ScreenSlot(
+            entity: screen,
+            materialIndex: screen.model?.materials.firstIndex {
+                $0.name == definition.scene.screenMaterial
+            } ?? 0,
+            textureSize: definition.scene.textureSize
+        )
+        try Self.turnTextureCoordinates(
+            of: screen, materialIndex: self.screen.materialIndex,
+            by: definition.scene.textureRotation ?? 0
+        )
+        if let fold = definition.scene.fold {
+            guard let cover = Self.findScreenEntity(
+                under: subject, explicitName: nil, materialName: fold.coverMaterial
+            ) else {
+                throw DeviceModelError.sceneNodeNotFound(fold.coverMaterial)
+            }
+            coverScreen = ScreenSlot(
+                entity: cover,
+                materialIndex: cover.model?.materials.firstIndex {
+                    $0.name == fold.coverMaterial
+                } ?? 0,
+                textureSize: fold.coverTextureSize
+            )
+            try Self.turnTextureCoordinates(
+                of: cover, materialIndex: coverScreen!.materialIndex,
+                by: fold.coverTextureRotation ?? 0
+            )
+            guard let clip = subject.availableAnimations.first(where: {
+                $0.name == fold.clip && $0.definition.duration.isFinite
+            }) else {
+                throw DeviceModelError.sceneNodeNotFound(fold.clip)
+            }
+            foldController = subject.playAnimation(clip, transitionDuration: 0, startsPaused: true)
+        }
         if plan.screenGlass {
             try Self.addCoverGlass(over: screen, subject: subject)
         }
@@ -159,37 +318,62 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         renderer = stage
         let wrapperEntity = Entity()
         wrapperEntity.name = "baguette-device"
+        let restEntity = Entity()
+        restEntity.name = "baguette-rest"
         subject.removeFromParent()
-        wrapperEntity.addChild(subject)
+        restEntity.addChild(subject)
+        wrapperEntity.addChild(restEntity)
         stage.entities.append(wrapperEntity)
         wrapper = wrapperEntity
+        rest = restEntity
+        restOrientation = Self.orientation(definition.scene.restRotation ?? .zero)
+        restEntity.orientation = restOrientation
 
         let bounds = subject.visualBounds(relativeTo: wrapperEntity)
         let extents = bounds.extents
         guard extents.x > 0 || extents.y > 0 || extents.z > 0 else {
             throw DeviceModelError.sceneHasNoGeometry
         }
-        subject.position -= bounds.center
+        subject.position -= subject.visualBounds(relativeTo: restEntity).center
         wrapperEntity.orientation = Self.orientation(plan.rotation)
 
-        let screenBounds = screen.visualBounds(relativeTo: wrapperEntity)
-        screenLocalCorners = ScreenLocalCorners.from(
-            center: Vector3(
-                x: Double(screenBounds.center.x),
-                y: Double(screenBounds.center.y),
-                z: Double(screenBounds.center.z)
-            ),
-            extents: Vector3(
-                x: Double(screenBounds.extents.x),
-                y: Double(screenBounds.extents.y),
-                z: Double(screenBounds.extents.z)
+        // Corners in the rest frame: relative to the wrapper, so the
+        // authored rest rotation is in and the requested one is not.
+        // From the screen's own mesh parts — a model may keep every
+        // material on one entity, whose bounds are the whole device.
+        let corners = { (slot: ScreenSlot) -> ScreenLocalCorners in
+            let bounds = Self.partBounds(of: slot.entity, materialIndex: slot.materialIndex, relativeTo: wrapperEntity)
+                ?? slot.entity.visualBounds(relativeTo: wrapperEntity)
+            return ScreenLocalCorners.from(
+                center: Vector3(
+                    x: Double(bounds.center.x),
+                    y: Double(bounds.center.y),
+                    z: Double(bounds.center.z)
+                ),
+                extents: Vector3(
+                    x: Double(bounds.extents.x),
+                    y: Double(bounds.extents.y),
+                    z: Double(bounds.extents.z)
+                )
             )
-        )
+        }
+        screenLocalCorners = corners(self.screen)
+        coverLocalCorners = coverScreen.map(corners)
+        bodyExtents = Vector3(x: Double(extents.x), y: Double(extents.y), z: Double(extents.z))
+        buttonAnchors = (definition.scene.buttons ?? []).compactMap { button in
+            Self.jointRestPosition(named: button.joint, of: self.screen.entity, relativeTo: wrapperEntity)
+                .map { ScreenButtonAnchor(id: button.id, at: $0) }
+        }
 
+        // A book's leaf stands up toward the camera as it shuts, so a
+        // foldable is framed as deep as a leaf is wide.
+        let depth = definition.scene.fold == nil
+            ? Double(extents.z)
+            : max(Double(extents.z), Double(extents.x) / 2)
         let framing = DeviceCameraFraming.fit(
             subjectWidth: Double(extents.x),
             subjectHeight: Double(extents.y),
-            subjectDepth: Double(extents.z),
+            subjectDepth: depth,
             viewport: plan.outputSize
         )
         cameraFraming = framing
@@ -221,7 +405,11 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
             device: device
         )
 
-        screenQuad = projectedScreenQuad(rotation: plan.rotation, zoom: 1)
+        view = Device3DCamera(rotation: plan.rotation, zoom: 1)
+        wrapperEntity.orientation = Self.orientation(effectiveRotation)
+        screenQuad = projectedScreenQuad(rotation: effectiveRotation, zoom: 1)
+        screenPieces = projectedScreenPieces()
+        screenButtons = projectedScreenButtons()
 
         // The engine's MSAA covers lit geometry but skips the unlit
         // screen pass, so its content edge stair-steps on tilted poses.
@@ -256,14 +444,17 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     // MARK: - per-frame rendering (MainActor)
 
     @MainActor
-    private func renderFrame(_ surface: IOSurface) throws -> IOSurface {
+    private func paint(_ slot: inout ScreenSlot, with surface: IOSurface) throws {
         let sourceSize = RenderDimensions(
             width: IOSurfaceGetWidth(surface),
             height: IOSurfaceGetHeight(surface)
         )
-        let texture = try screenLowLevelTexture(for: sourceSize)
-        try blit(surface, into: texture, size: sourceSize)
+        let texture = try screenLowLevelTexture(for: sourceSize, on: &slot)
+        try blit(surface, into: texture, size: sourceSize, region: slot.contentRegion)
+    }
 
+    @MainActor
+    private func renderScene() throws -> IOSurface {
         let target = renderTargets.next()
         let output = try supersampled?.output ?? RealityRenderer.CameraOutput(
             .singleProjection(colorTexture: target.texture)
@@ -295,10 +486,11 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     /// to the simulator surface; UV placement handles cover/contain/stretch.
     @MainActor
     private func screenLowLevelTexture(
-        for sourceSize: RenderDimensions
+        for sourceSize: RenderDimensions,
+        on slot: inout ScreenSlot
     ) throws -> LowLevelTexture {
-        if let screenTexture, screenSourceSize == sourceSize {
-            return screenTexture
+        if let texture = slot.texture, slot.sourceSize == sourceSize {
+            return texture
         }
         let texture = try LowLevelTexture(descriptor: .init(
             pixelFormat: .bgra8Unorm_srgb,
@@ -311,26 +503,26 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         material.color = .init(tint: .white, texture: .init(try .init(from: texture)))
         let placement = plan.fit.placement(
             source: sourceSize,
-            target: plan.model.definition.scene.textureSize
+            target: slot.textureSize
         )
         material.textureCoordinateTransform = .init(
             offset: [Float(placement.offsetX), Float(placement.offsetY)],
             scale: [Float(placement.scaleX), Float(placement.scaleY)]
         )
-        if var model = screenEntity.model {
+        if var model = slot.entity.model {
             var materials = model.materials
-            materials[screenMaterialIndex] = material
+            materials[slot.materialIndex] = material
             model.materials = materials
-            screenEntity.model = model
+            slot.entity.model = model
         }
         // The visible window keeps a permanent 2-pixel black border, and
         // per-frame blits cover only the interior. Texture filtering fades
         // content into the border over a texel, so the display's content
         // edge resolves smoothly instead of dot-dashing at the mesh edge.
         try blackFill(texture, size: sourceSize)
-        screenContentRegion = placement.contentRegion(in: sourceSize, inset: 2)
-        screenTexture = texture
-        screenSourceSize = sourceSize
+        slot.contentRegion = placement.contentRegion(in: sourceSize, inset: 2)
+        slot.texture = texture
+        slot.sourceSize = sourceSize
         return texture
     }
 
@@ -373,7 +565,8 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private func blit(
         _ surface: IOSurface,
         into texture: LowLevelTexture,
-        size: RenderDimensions
+        size: RenderDimensions,
+        region: ContentRegion?
     ) throws {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm_srgb,
@@ -397,7 +590,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
         guard let encoder = commandBuffer.makeBlitCommandEncoder() else {
             throw DeviceModelError.renderFailed
         }
-        if let region = screenContentRegion, region.width > 0, region.height > 0 {
+        if let region, region.width > 0, region.height > 0 {
             encoder.copy(
                 from: source,
                 sourceSlice: 0,
@@ -418,6 +611,86 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     }
 
     // MARK: - entity helpers
+
+    /// A skeleton joint's rest position — the rest pose accumulated up
+    /// its parents — in `reference`'s frame; nil when no skeleton of the
+    /// entity's mesh has the joint.
+    @MainActor
+    private static func jointRestPosition(
+        named name: String, of entity: ModelEntity, relativeTo reference: Entity
+    ) -> Vector3? {
+        guard let model = entity.model else { return nil }
+        for skeleton in model.mesh.contents.skeletons {
+            let joints = skeleton.joints
+            guard let index = joints.firstIndex(where: { $0.name == name || $0.name.hasSuffix("/" + name) }) else {
+                continue
+            }
+            var matrix = matrix_identity_float4x4
+            var current: Int? = index
+            while let i = current {
+                matrix = joints[i].restPoseTransform.matrix * matrix
+                current = joints[i].parentIndex
+            }
+            let local = SIMD3<Float>(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z)
+            let world = entity.convert(position: local, to: reference)
+            return Vector3(x: Double(world.x), y: Double(world.y), z: Double(world.z))
+        }
+        return nil
+    }
+
+    /// The bounds of the mesh parts on one material, in `reference`'s
+    /// frame; nil when the entity has no such part.
+    @MainActor
+    private static func partBounds(
+        of entity: ModelEntity, materialIndex: Int, relativeTo reference: Entity
+    ) -> BoundingBox? {
+        guard let model = entity.model else { return nil }
+        var box: BoundingBox?
+        for mesh in model.mesh.contents.models {
+            for part in mesh.parts where part.materialIndex == materialIndex {
+                for position in part.positions.elements {
+                    let world = entity.convert(position: position, to: reference)
+                    if var current = box {
+                        current.formUnion(BoundingBox(min: world, max: world))
+                        box = current
+                    } else {
+                        box = BoundingBox(min: world, max: world)
+                    }
+                }
+            }
+        }
+        return box
+    }
+
+    /// Turn a screen's texture coordinates by quarter turns, so frames
+    /// whose rows run the other way from the mesh's UVs read upright.
+    /// Rewrites only the parts on that material; skinning and the rest
+    /// of the mesh round-trip untouched.
+    @MainActor
+    private static func turnTextureCoordinates(
+        of entity: ModelEntity, materialIndex: Int, by degrees: Int
+    ) throws {
+        let turns = (((degrees / 90) % 4) + 4) % 4
+        guard turns != 0, var model = entity.model else { return }
+        var contents = model.mesh.contents
+        contents.models = .init(contents.models.map { mesh in
+            var mesh = mesh
+            mesh.parts = .init(mesh.parts.map { part in
+                guard part.materialIndex == materialIndex,
+                      let coordinates = part.textureCoordinates else { return part }
+                var part = part
+                part.textureCoordinates = .init(coordinates.elements.map { point in
+                    var u = point.x, v = point.y
+                    for _ in 0..<turns { (u, v) = (v, 1 - u) }
+                    return SIMD2<Float>(u, v)
+                })
+                return part
+            })
+            return mesh
+        })
+        try model.mesh.replace(with: contents)
+        entity.model = model
+    }
 
     @MainActor
     private static func findEntity(named name: String, under root: Entity) -> Entity? {

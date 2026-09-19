@@ -89,7 +89,7 @@ private final class LockedCount: @unchecked Sendable {
     func increment() { lock.withLock { storage += 1 } }
 }
 
-private extension RenderedScreenTests {
+extension RenderedScreenTests {
     static func surface(width: Int, height: Int) -> IOSurface? {
         IOSurfaceCreate([
             kIOSurfaceWidth: width,

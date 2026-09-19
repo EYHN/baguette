@@ -55,6 +55,20 @@ struct SimulatorDefinition: Equatable, Sendable {
         let rect: Rect
         /// Inner-corner radius for the screen cutout, chrome pixels.
         let clipRadius: Double
+        /// How far past the bare body a button cap may show, per edge,
+        /// in chrome pixels — the canvas the baked composite clipped
+        /// caps to. The SDK clips its overlays to the same canvas so a
+        /// cap drawn behind the body protrudes by the same nub.
+        let buttonMargins: Insets
+        /// URL of the panel's framebuffer mask — the shape the simulator
+        /// clips this screen to — when the chrome carries one. The page
+        /// masks the live frame with it instead of rounding by
+        /// `clipRadius`, which cannot say "square on the hinge side".
+        let maskImage: String?
+        /// A foldable's unfolded panel: one framebuffer creased across
+        /// the middle of its long axis by the hinge. Drawn by the page;
+        /// the fold view splits there.
+        let crease: Bool
         /// Bezel image URLs. `rest` is the merged composite (default),
         /// `bare` is the device body with buttons stripped — the
         /// SDK fetches `bare` when buttons are rendered as separate
@@ -170,6 +184,14 @@ extension SimulatorDefinition {
                     "height": screen.rect.size.height,
                 ],
                 "clipRadius": screen.clipRadius,
+                "maskImage": screen.maskImage.map { $0 as Any } ?? NSNull(),
+                "crease": screen.crease,
+                "buttonMargins": [
+                    "top":    screen.buttonMargins.top,
+                    "left":   screen.buttonMargins.left,
+                    "bottom": screen.buttonMargins.bottom,
+                    "right":  screen.buttonMargins.right,
+                ],
                 "bezelImage": [
                     "rest": screen.bezelImage.rest,
                     "bare": screen.bezelImage.bare,
@@ -217,10 +239,13 @@ extension SimulatorDefinition {
     /// appending the well-known suffixes. Keeping the prefix as an
     /// argument means the domain stays URL-agnostic — the server
     /// decides the route layout, the factory just composes strings.
+    /// `panel` is which of the device's panels the chrome describes;
+    /// a foldable's `.secondary` is the creased, unfolded one.
     static func compose(
         from simulator: any Simulator,
         chrome assets: DeviceChromeAssets,
-        urlPrefix: String
+        urlPrefix: String,
+        panel: IntegratedPanel = .primary
     ) -> SimulatorDefinition {
         compose(
             identity: Identity(
@@ -229,8 +254,17 @@ extension SimulatorDefinition {
                 model: simulator.deviceTypeName
             ),
             chrome: assets,
-            urlPrefix: urlPrefix
+            urlPrefix: urlPrefix,
+            panel: panel
         )
+    }
+
+    /// The query that names the panel on every image URL. `bezel.png`
+    /// and the button images are cached for a day, so a URL must always
+    /// mean one panel — a plain URL that served whichever panel was lit
+    /// came back from the cache as the wrong bezel after every fold.
+    private static func panelQuery(_ panel: IntegratedPanel, first: Bool) -> String {
+        (first ? "?" : "&") + "panel=" + (panel == .primary ? "primary" : "secondary")
     }
 
     /// Identity-first flavor for surfaces that aren't simulators — a
@@ -239,7 +273,8 @@ extension SimulatorDefinition {
     static func compose(
         identity: Identity,
         chrome assets: DeviceChromeAssets,
-        urlPrefix: String
+        urlPrefix: String,
+        panel: IntegratedPanel = .primary
     ) -> SimulatorDefinition {
         let chrome = assets.chrome
         // The SDK always renders the bare bezel + button overlays, so
@@ -261,9 +296,13 @@ extension SimulatorDefinition {
                 viewport:   bare,
                 rect:       screenRect,
                 clipRadius: chrome.innerCornerRadius,
+                buttonMargins: m,
+                maskImage: assets.screenMask == nil ? nil
+                    : "\(urlPrefix)/screen-mask.png" + panelQuery(panel, first: true),
+                crease: panel == .secondary,
                 bezelImage: BezelImage(
-                    rest: "\(urlPrefix)/bezel.png",
-                    bare: "\(urlPrefix)/bezel.png?buttons=false"
+                    rest: "\(urlPrefix)/bezel.png" + panelQuery(panel, first: true),
+                    bare: "\(urlPrefix)/bezel.png?buttons=false" + panelQuery(panel, first: false)
                 )
             ),
             buttons: chrome.buttons.compactMap { b in
@@ -271,7 +310,8 @@ extension SimulatorDefinition {
                     fromChrome: b,
                     imageSize: assets.buttonImages[b.name]?.size,
                     bareSize: bare,
-                    urlPrefix: urlPrefix
+                    urlPrefix: urlPrefix,
+                    query: panelQuery(panel, first: true)
                 )
             },
             keyboard: Self.keyboard(for: chrome.identifier)
@@ -298,11 +338,14 @@ extension SimulatorDefinition.Button {
     /// a known wire button — keeps the SDK surface honest (no
     /// inert "tooltip-only" buttons; if it isn't wired, it isn't
     /// in the definition).
+    /// `query` is appended to every image URL — the unfolded panel's
+    /// `?panel=secondary`, empty for the primary.
     init?(
         fromChrome b: ChromeButton,
         imageSize: Size?,
         bareSize: Size,
-        urlPrefix: String
+        urlPrefix: String,
+        query: String = ""
     ) {
         guard let wire = Self.wireButton(for: b.name) else { return nil }
         // The button overlay needs a real image size to size its
@@ -317,10 +360,10 @@ extension SimulatorDefinition.Button {
             id: b.name,
             envelope: ["type": "button", "button": wire],
             images: SimulatorDefinition.ButtonImages(
-                rest:    "\(urlPrefix)/chrome-button/\(b.name).png",
+                rest:    "\(urlPrefix)/chrome-button/\(b.name).png\(query)",
                 pressed: b.imageDownName != nil
-                    ? "\(urlPrefix)/chrome-button/\(b.name)-down.png"
-                    : "\(urlPrefix)/chrome-button/\(b.name).png"
+                    ? "\(urlPrefix)/chrome-button/\(b.name)-down.png\(query)"
+                    : "\(urlPrefix)/chrome-button/\(b.name).png\(query)"
             ),
             box: Self.box(for: b, imageSize: imageSize, bareSize: bareSize),
             transform: Self.transform(for: b, imageSize: imageSize),

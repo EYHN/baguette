@@ -2,27 +2,35 @@ import Foundation
 
 /// Resolves the Indigo HID digitizer target for a display plane.
 ///
-/// Both answers are constants, because a target is only valid if some
-/// create-service message registered it — see `IndigoHIDTouchTarget`.
-/// The plane picks *which* service to address; the screen it is
-/// currently showing on has nothing to do with it.
+/// Every answer is a registration, because a target is only valid if
+/// some create-service message registered it — see `IndigoHIDTouchTarget`.
 ///
-/// `connectedScreenId` and `derive` are kept for the caller's shape and
-/// deliberately unused for CarPlay. `IndigoHIDTargetForScreen` is a real
-/// SimulatorKit export and it is tempting precisely because it looks
-/// like the answer — it returns `0x40000000 | screenId`, a plausible
-/// number that no service has registered. Sending there is what
-/// restarted the guest.
+/// CarPlay addresses its service's fixed target; the screen it shows
+/// on has nothing to do with it. `derive` is kept for the caller's
+/// shape and deliberately unused there: `IndigoHIDTargetForScreen`
+/// over the CarPlay screen id gives `0x40000002`, which nothing
+/// registered, and sending there restarted the guest.
+///
+/// The phone plane addresses the bound panel's own digitizer when a
+/// panel is bound (`connectedScreenId`), and the built-in slot when
+/// none is. The two coincide on every single-panel device; they part
+/// on a foldable, where the slot belongs to the last panel created
+/// and the phone plane wants the lit one.
 enum DisplayTouchTarget {
     static func resolve(
         kind: DisplayKind,
-        connectedScreenId: UInt32,
+        connectedScreenId: UInt32?,
         derive: (UInt32) -> UInt32?,
         override: UInt32? = nil
     ) -> UInt32? {
         switch kind {
-        case .phone:   return IndigoHIDTouchTarget.phone
-        case .carPlay: return override ?? IndigoHIDTouchTarget.carPlay
+        case .phone:
+            guard let screenId = connectedScreenId, screenId != 0 else {
+                return IndigoHIDTouchTarget.phone
+            }
+            return IndigoHIDTouchTarget.panel(screenId: screenId)
+        case .carPlay:
+            return override ?? IndigoHIDTouchTarget.carPlay
         }
     }
 

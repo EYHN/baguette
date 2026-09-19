@@ -40,6 +40,7 @@ struct SimulatorTests {
 
     @Test func `chrome looks up assets by device-type name`() {
         let chromes = MockChromes()
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         let assets = DeviceChromeAssets(
             chrome: DeviceChrome(
                 identifier: "phone11",
@@ -65,6 +66,7 @@ struct SimulatorTests {
     // Chrome lookup keys off `deviceTypeName`, not the display name.
     @Test func `chrome keys off deviceTypeName even when display name differs`() {
         let chromes = MockChromes()
+        given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         let assets = DeviceChromeAssets(
             chrome: DeviceChrome(
                 identifier: "phone11",

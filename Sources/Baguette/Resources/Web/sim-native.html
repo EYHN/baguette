@@ -1588,6 +1588,40 @@
   #simNativeView .r3d-live-stage[data-mode="interact"] .r3d-live-canvas {
     cursor: crosshair;
   }
+  /* The model's hardware buttons, placed by the server over the stage;
+     shown while the pointer is on the stage, as Device Hub shows them. */
+  #simNativeView .r3d-hw-buttons { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+  #simNativeView .r3d-hw-button {
+    position: absolute; transform: translate(-50%, -50%);
+    min-width: 28px; height: 28px; padding: 0 8px; border-radius: 99px;
+    border: 1px solid rgba(15, 23, 42, 0.14); background: rgba(255, 255, 255, 0.92);
+    color: #1e293b; font: 600 12px/1 -apple-system, Inter, sans-serif;
+    cursor: pointer; pointer-events: auto; opacity: 0; transition: opacity 160ms ease;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+  }
+  #simNativeView #native3DStage:hover .r3d-hw-button { opacity: 1; }
+  #simNativeView .r3d-hw-button:active { background: #e2e8f0; }
+  /* Device Hub's pose picker, under the book. */
+  #simNativeView .r3d-pose-picker {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; gap: 4px; padding: 4px; border-radius: 99px; z-index: 6;
+    background: rgba(255, 255, 255, 0.94); border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 1px 6px rgba(15, 23, 42, 0.12);
+  }
+  #simNativeView .r3d-pose-picker button {
+    width: 34px; height: 26px; border: 0; border-radius: 99px; padding: 0;
+    background: transparent; color: #475569; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #simNativeView .r3d-pose-picker button:hover { background: rgba(15, 23, 42, 0.06); }
+  #simNativeView .r3d-pose-picker button.active { background: #dbeafe; color: #2563eb; }
+  /* A booted foldable never shows the flat chrome: its view is the book. */
+  #simNativeView #nativeDeviceFrame[data-foldable] { display: none; }
+  /* Fixed 3D (a foldable's default view): straight on, no tools. */
+  #simNativeView #native3DStage[data-fixed="true"] .r3d-stage-tools,
+  #simNativeView #native3DStage[data-fixed="true"] .r3d-inspector-toggle {
+    display: none;
+  }
   #simNativeView .r3d-stage-tools {
     position: absolute; left: 14px; bottom: 14px; z-index: 3;
     display: flex; gap: 4px; padding: 4px;

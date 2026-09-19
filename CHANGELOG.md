@@ -10,6 +10,57 @@ For releases prior to this changelog, see the
 
 ## [Unreleased]
 
+### Added
+
+- **iPhone Duo in 3D.** A booted Duo's page renders Apple's own model
+  of the device (`V68.usdz`, read from the selected Xcode's DeviceKit
+  plug-in — the model Device Hub draws) on the RealityKit pipeline,
+  straight on, with both panels on the book's screens and the hinge
+  posing it live. Clicks map through the lit screen's pieces, the
+  model's buttons are controls beside the device, the rotate button
+  turns the book, and Device Hub's pose picker moves the device's own
+  hinge (`set_pose`).
+- **`baguette hinge`** and `POST /simulators/<udid>/hinge` fold iPhone
+  Duo — `--pose closed|open|flat` or `--angle`, swept over Device Hub's
+  0.8 s — through `HingeControl`, a guest-side executable (the first
+  non-dylib under `Injected/`) that reproduces the HID pose events
+  Device Hub's `dtuhidd` dispatches. `docs/features/hinge.md` records
+  the route. `Subprocess` gains `runInteractive` / `write` for a child
+  served commands on stdin. The book stays centred in the frame as it
+  folds (`FoldPose.centring`), as Device Hub keeps it. Packaging: the
+  homebrew formula needs one plain-link entry for the executable
+  (`hinge.md` § Packaging). Model definitions
+  gain `asset.xcodeResource`, `scene.restRotation`,
+  `scene.textureRotation`, `scene.fold` and `scene.buttons`; the 3D
+  socket's `screen_quad` gains `pieces`, `buttons` and `litPanel`, and
+  `set_3d_camera` takes `orientation`.
+
+### Added
+
+- **iPhone Duo (Xcode 27.1 beta, iOS 27.1).** The first foldable
+  simulator has two integrated panels and boots folded: the cover
+  (`primary`, 466×678 pt) is lit and the larger unfolded panel
+  (`primary-1`) is dark. baguette bound the dark one — `screenshot` /
+  `stream` / `serve` showed 2007×2853 of black, and every tap went to
+  its digitizer, because `0x32` turns out to be a slot the last
+  built-in panel created owns rather than the phone's own digitizer.
+  The phone plane now binds the Connected Screen CoreSimulator names
+  `primary` and, on a multi-panel device only, addresses that panel's
+  own `0x40000000 | screenId` registration (`0x40000001` — the number
+  the CarPlay work had filed as a near-miss). Single-panel devices take
+  the same path they always did, with no new guest round-trip.
+- **baguette follows the Duo's hinge.** Device Hub's pose picker folds
+  and unfolds the device; baguette reads the angle back through
+  `devicectl device motion hinge-angle` (~0.3 s, foldables only) and
+  binds the lit panel for everything: stream, screenshot, taps (the
+  unfolded panel's own digitizer, `0x40000003`), `chrome layout` and
+  the bezel (`phone14`, 669×951 when open), `describe-ui` point space.
+  `GET /simulators/<udid>/hinge` reports `angleDegrees`, `litPanel` and
+  the guest's `orientation`; the page polls it and re-bootstraps when
+  the pose changes, taking the guest's landscape rather than forcing
+  portrait. `chrome layout --panel cover|unfolded` reads either panel's
+  layout by name. See `docs/features/iphone-duo.md`.
+
 ---
 
 ## [0.1.98] - 2026-09-16

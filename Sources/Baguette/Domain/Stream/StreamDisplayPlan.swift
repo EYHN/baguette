@@ -20,6 +20,15 @@ enum DisplayFlagError: Error, Equatable {
 struct StreamDisplayPlan: Equatable, Sendable {
     let kind: DisplayKind
     let enableCarPlay: Bool
+    /// The phone plane pinned to one of a foldable's panels, or `nil`
+    /// to follow the hinge. Only meaningful for `.phone`.
+    let panel: IntegratedPanel?
+
+    init(kind: DisplayKind, enableCarPlay: Bool, panel: IntegratedPanel? = nil) {
+        self.kind = kind
+        self.enableCarPlay = enableCarPlay
+        self.panel = kind == .phone ? panel : nil
+    }
 
     /// Live 3D routes stay on the phone plane regardless of query.
     static let phoneOnly = StreamDisplayPlan(kind: .phone, enableCarPlay: false)
@@ -47,12 +56,20 @@ struct StreamDisplayPlan: Equatable, Sendable {
         }
     }
 
-    static func from(query: String?) -> StreamDisplayPlan {
+    /// `panel` is the stream route's `?panel=primary|secondary`; anything
+    /// else leaves the plane to the hinge.
+    static func from(query: String?, panel: String? = nil) -> StreamDisplayPlan {
+        let pinned: IntegratedPanel?
+        switch panel {
+        case "primary": pinned = .primary
+        case "secondary": pinned = .secondary
+        default: pinned = nil
+        }
         switch DisplayKind.parse(query: query) {
         case .carPlay:
             return StreamDisplayPlan(kind: .carPlay, enableCarPlay: true)
         case .phone, .none:
-            return StreamDisplayPlan(kind: .phone, enableCarPlay: false)
+            return StreamDisplayPlan(kind: .phone, enableCarPlay: false, panel: pinned)
         }
     }
 
@@ -66,6 +83,10 @@ struct StreamDisplayPlan: Equatable, Sendable {
         }
         switch kind {
         case .phone:
+            if let panel {
+                let display = sim.displays().panel(panel)
+                return (display.screen(), display.input())
+            }
             return (sim.screen(), sim.input())
         case .carPlay:
             let display = sim.displays()[.carPlay]

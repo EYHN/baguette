@@ -76,16 +76,32 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
         }
     }
 
+    /// The device's own plane, bound before use.
+    ///
+    /// These used to open an unbound `SimulatorKitScreen` (largest
+    /// surface each tick) and an `IndigoHIDInput` on the built-in slot.
+    /// Both are right on a single-panel device and both are wrong on a
+    /// foldable: iPhone Duo's largest surface and its built-in slot are
+    /// the unfolded panel, dark while folded. Going through the phone
+    /// `Display` binds the panel Connected Screens names `primary` for
+    /// the framebuffer, and — only when there are several panels —
+    /// addresses that panel's own digitizer. See `SimulatorKitDisplay`.
     func screen() -> any Screen {
-        SimulatorKitScreen(udid: udid, host: host)
+        displays().phone.screen()
     }
 
     func input() -> any Input {
-        IndigoHIDInput(udid: udid, host: host)
+        displays().phone.input()
     }
 
     func displays() -> any Displays {
-        SimulatorKitDisplays(udid: udid, host: host)
+        SimulatorKitDisplays(udid: udid, host: host, hinge: hinge())
+    }
+
+    /// One monitor per device: sockets share a watch and binds read the
+    /// last sample while it runs. See `SharedHinge`.
+    func hinge() -> any Hinge {
+        SharedHinge.forDevice(udid, make: { DevicectlHinge(udid: udid) }, motor: GuestHingeMotor(udid: udid))
     }
 
     func externalDisplays() -> any ExternalDisplays {
@@ -93,7 +109,34 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
     }
 
     func accessibility() -> any Accessibility {
-        AXPTranslatorAccessibility(udid: udid, host: host)
+        AXPTranslatorAccessibility(
+            udid: udid, host: host,
+            litPanelPointSize: { [udid, host] in
+                // Only a foldable has a panel to choose; a phone keeps the
+                // device type's `mainScreenSize` and pays no round-trip.
+                guard let sized = try? SimulatorKitFramebufferPorts.sizedPorts(udid: udid, host: host),
+                      IntegratedPanels.several(in: sized),
+                      let binding = try? SimulatorKitDisplays(
+                          udid: udid, host: host,
+                          hinge: SharedHinge.forDevice(udid) { DevicectlHinge(udid: udid) }
+                      ).phone.resolve(),
+                      let scale = Self.mainScreenScale(udid: udid, host: host),
+                      let size = binding.pointSize(scale: scale)
+                else { return nil }
+                return CGSize(width: size.width, height: size.height)
+            }
+        )
+    }
+
+    /// `deviceType.mainScreenScale` — the same number for every panel
+    /// of a device (iPhone Duo is @3x on both).
+    private static func mainScreenScale(udid: String, host: any DeviceHost) -> Double? {
+        guard let device = host.resolveDevice(udid: udid),
+              let deviceType = device.value(forKey: "deviceType") as? NSObject,
+              let scale = (deviceType.value(forKey: "mainScreenScale") as? NSNumber)?.doubleValue,
+              scale > 0
+        else { return nil }
+        return scale
     }
 
     func logs() -> any LogStream {

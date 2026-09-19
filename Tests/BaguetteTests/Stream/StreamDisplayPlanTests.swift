@@ -70,6 +70,38 @@ struct StreamDisplayPlanBindTests {
         verify(sim).displays().called(0)
     }
 
+    /// A foldable's page brings the other panel in while the hinge is
+    /// still turning — before the runtime has swapped — so the stream
+    /// it opens must be pinned to that panel rather than follow the
+    /// hinge. Pinned, the phone plane comes from `displays().panel(_:)`.
+    @Test func `a pinned panel binds the phone plane to that panel`() throws {
+        let sim = MockSimulator()
+        let displays = MockDisplays()
+        let display = MockDisplay()
+        let screen = MockScreen()
+        let input = MockInput()
+        given(sim).displays().willReturn(displays)
+        given(displays).panel(.value(.secondary)).willReturn(display)
+        given(display).screen().willReturn(screen)
+        given(display).input().willReturn(input)
+
+        let plan = StreamDisplayPlan.from(query: nil, panel: "secondary")
+        #expect(plan.panel == .secondary)
+        let bound = try plan.bind(to: sim)
+
+        #expect(bound.screen as? MockScreen === screen)
+        #expect(bound.input as? MockInput === input)
+        verify(sim).screen().called(0)
+    }
+
+    @Test func `an unknown or absent panel query leaves the plane to the hinge`() {
+        #expect(StreamDisplayPlan.from(query: nil, panel: nil).panel == nil)
+        #expect(StreamDisplayPlan.from(query: nil, panel: "inner").panel == nil)
+        #expect(StreamDisplayPlan.from(query: "phone", panel: "primary").panel == .primary)
+        // A pin only makes sense for the phone plane.
+        #expect(StreamDisplayPlan.from(query: "carplay", panel: "secondary").panel == nil)
+    }
+
     @Test func `carPlay bind enables the panel then takes screen and input from the carPlay display`() throws {
         let sim = MockSimulator()
         let external = MockExternalDisplays()

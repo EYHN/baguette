@@ -29,24 +29,46 @@ final class LiveChromes: Chromes, @unchecked Sendable {
     }
 
     func assets(forDeviceName deviceName: String) -> DeviceChromeAssets? {
-        guard let profile = resolveProfile(deviceName: deviceName) else {
+        assets(forDeviceName: deviceName, panel: .primary)
+    }
+
+    func panels(forDeviceName deviceName: String) -> [IntegratedPanel] {
+        resolveProfile(deviceName: deviceName)?.panels ?? []
+    }
+
+    func assets(forDeviceName deviceName: String, panel: IntegratedPanel) -> DeviceChromeAssets? {
+        guard let profile = resolveProfile(deviceName: deviceName)?.panel(panel) else {
             return nil
         }
         let chromeID = profile.chromeIdentifier
+        // The mask is the panel's, not the chrome's — two panels could
+        // share a bundle and differ in shape — so it is part of the key.
+        let key = chromeID + (profile.framebufferMaskIdentifier.map { "|" + $0 } ?? "")
 
         lock.lock()
-        if let cached = cache[chromeID] {
+        if let cached = cache[key] {
             lock.unlock()
             return cached
         }
         lock.unlock()
 
         let resolved = loadAssets(chromeIdentifier: chromeID, profile: profile)
+            .map { $0.withScreenMask(screenMask(for: profile)) }
 
         lock.lock()
-        cache[chromeID] = resolved
+        cache[key] = resolved
         lock.unlock()
         return resolved
+    }
+
+    /// The panel's framebuffer mask, rasterized; `nil` when the profile
+    /// names none or the file will not read — the bezel does not depend
+    /// on it.
+    private func screenMask(for profile: DeviceProfile.PanelProfile) -> ChromeImage? {
+        guard let id = profile.framebufferMaskIdentifier,
+              let pdf = try? store.framebufferMaskPDF(identifier: id)
+        else { return nil }
+        return try? rasterizer.rasterize(pdfData: pdf)
     }
 
     // MARK: - private
@@ -69,7 +91,7 @@ final class LiveChromes: Chromes, @unchecked Sendable {
 
     private func loadAssets(
         chromeIdentifier: String,
-        profile: DeviceProfile
+        profile: DeviceProfile.PanelProfile
     ) -> DeviceChromeAssets? {
         let chrome: DeviceChrome
         do {
@@ -109,7 +131,7 @@ final class LiveChromes: Chromes, @unchecked Sendable {
     private func loadComposite(
         chromeIdentifier: String,
         chrome: DeviceChrome,
-        profile: DeviceProfile
+        profile: DeviceProfile.PanelProfile
     ) -> ChromeImage? {
         if let imageName = chrome.compositeImageName,
            let pdf = try? store.chromeAssetPDF(

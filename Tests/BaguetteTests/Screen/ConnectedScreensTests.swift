@@ -23,6 +23,89 @@ struct ConnectedScreensTests {
         size: Size(width: 100, height: 100)
     )
 
+    // MARK: - foldable
+
+    /// iPhone Duo (iOS 27.1): the cover (`primary`, 1398×2034) and the
+    /// unfolded panel (`primary-1`, 2007×2853). Both are portrait and
+    /// both are Integrated, so shape cannot pick; the hinge says which
+    /// one the guest lights, and the phone plane binds that one.
+    private let coverPanel = FramebufferPortSnapshot(
+        portName: "com.apple.framebuffer.display",
+        connectedScreenId: 1,
+        size: Size(width: 1398, height: 2034),
+        panel: .primary
+    )
+    private let unfoldedPanel = FramebufferPortSnapshot(
+        portName: "com.apple.framebuffer.display",
+        connectedScreenId: 3,
+        size: Size(width: 2007, height: 2853),
+        panel: .secondary,
+        orientation: .landscapeLeft
+    )
+
+    @Test func `folded, phone binds the cover panel, not the larger dark one`() throws {
+        let binding = try ConnectedScreens.binding(
+            kind: .phone,
+            ports: [unfoldedPanel, coverPanel],
+            litPanel: .primary
+        )
+        #expect(binding.connectedScreenId == 1)
+        #expect(binding.size == coverPanel.size)
+    }
+
+    @Test func `unfolded, phone binds the unfolded panel`() throws {
+        let binding = try ConnectedScreens.binding(
+            kind: .phone,
+            ports: [unfoldedPanel, coverPanel],
+            litPanel: .secondary
+        )
+        #expect(binding.connectedScreenId == 3)
+        #expect(binding.size == unfoldedPanel.size)
+        // The guest turned the unfolded panel; the binding says so.
+        #expect(binding.orientation == .landscapeLeft)
+    }
+
+    /// With no hinge reading the device is taken as it boots: folded.
+    @Test func `without a hinge reading the cover is the phone`() throws {
+        let binding = try ConnectedScreens.binding(
+            kind: .phone,
+            ports: [unfoldedPanel, coverPanel]
+        )
+        #expect(binding.connectedScreenId == 1)
+    }
+
+    /// A single-panel device has only a primary; asking for the
+    /// secondary must not bind nothing.
+    @Test func `a device with one panel binds it whatever the hinge says`() throws {
+        let binding = try ConnectedScreens.binding(
+            kind: .phone,
+            ports: [coverPanel, carPlayPort],
+            litPanel: .secondary
+        )
+        #expect(binding.connectedScreenId == 1)
+    }
+
+    /// The second panel is portrait, so it is never mistaken for an
+    /// external either.
+    @Test func `a foldable's second panel does not bind as CarPlay`() {
+        #expect(throws: FramebufferSelectionError.noMatchingPort(.carPlay)) {
+            try ConnectedScreens.binding(
+                kind: .carPlay,
+                ports: [unfoldedPanel, coverPanel]
+            )
+        }
+    }
+
+    /// Without a named panel — every device before the Duo, and older
+    /// enumerate output — shape still decides, exactly as before.
+    @Test func `without a named panel the largest portrait port is still the phone`() throws {
+        let binding = try ConnectedScreens.binding(
+            kind: .phone,
+            ports: [overlayPort, phonePort, carPlayPort]
+        )
+        #expect(binding.connectedScreenId == 1)
+    }
+
     @Test func `phone binds the largest-area framebuffer port`() throws {
         let binding = try ConnectedScreens.binding(
             kind: .phone,
@@ -166,5 +249,32 @@ struct ConnectedScreensTests {
         #expect(throws: FramebufferSelectionError.screenIdUnavailable) {
             try ConnectedScreens.binding(kind: .phone, ports: [headless])
         }
+    }
+}
+
+/// The bound panel's size in points — what accessibility frames are
+/// expressed in. On a foldable the lit panel changes with the hinge,
+/// so the AX space has to come from the binding, not from the device
+/// type's single `mainScreenSize`.
+@Suite("DisplayBinding point size")
+struct DisplayBindingPointSizeTests {
+
+    @Test func `is the pixel size over the scale`() {
+        let unfolded = DisplayBinding(
+            kind: .phone, connectedScreenId: 3,
+            portName: "com.apple.framebuffer.display",
+            size: Size(width: 2007, height: 2853)
+        )
+        #expect(unfolded.pointSize(scale: 3) == Size(width: 669, height: 951))
+    }
+
+    @Test func `a zero or negative scale yields no point size`() {
+        let cover = DisplayBinding(
+            kind: .phone, connectedScreenId: 1,
+            portName: "com.apple.framebuffer.display",
+            size: Size(width: 1398, height: 2034)
+        )
+        #expect(cover.pointSize(scale: 0) == nil)
+        #expect(cover.pointSize(scale: -1) == nil)
     }
 }

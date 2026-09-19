@@ -1,19 +1,31 @@
 import Foundation
 import CryptoKit
 
-/// A dylib baguette ships for injection into simulator apps.
+/// A guest-side binary baguette ships: a dylib injected into simulator
+/// apps, or an executable spawned in the guest.
 ///
-/// Three today — the virtual camera, virtual motion and network
+/// Three dylibs today — the virtual camera, virtual motion and network
 /// conditioning — sharing one install layout, one arming mechanism
-/// (`InjectedDylibs`) and one `DYLD_INSERT_LIBRARIES`.
+/// (`InjectedDylibs`) and one `DYLD_INSERT_LIBRARIES`; and one
+/// executable, `HingeControl`, run with `simctl spawn`.
 struct InjectedDylib: Equatable, Sendable {
-    /// Base name; the file on disk is `<name>.dylib`.
+    enum Kind: Sendable { case dylib, executable }
+
+    /// Base name; the file on disk is `<name>.dylib`, or `<name>` for an
+    /// executable.
     let name: String
     /// Env var that points at a hand-built copy, for iterating on the dylib
     /// without rebuilding baguette.
     let environmentOverride: String
+    let kind: Kind
 
-    var fileName: String { "\(name).dylib" }
+    init(name: String, environmentOverride: String, kind: Kind = .dylib) {
+        self.name = name
+        self.environmentOverride = environmentOverride
+        self.kind = kind
+    }
+
+    var fileName: String { kind == .dylib ? "\(name).dylib" : name }
 
     /// Where this dylib's built copy sits relative to the repo root, for the
     /// dev-build fallback that walks up from the executable.
@@ -30,6 +42,9 @@ struct InjectedDylib: Equatable, Sendable {
         name: "VirtualMotion", environmentOverride: "BAGUETTE_VIRTUALMOTION_DYLIB")
     static let network = InjectedDylib(
         name: "VirtualNetwork", environmentOverride: "BAGUETTE_VIRTUALNETWORK_DYLIB")
+    /// Drives iPhone Duo's hinge from inside the guest (`GuestHingeMotor`).
+    static let hingeControl = InjectedDylib(
+        name: "HingeControl", environmentOverride: "BAGUETTE_HINGECONTROL_TOOL", kind: .executable)
 }
 
 /// Pure factory: turns a (dylib-bytes, support-dir, dylib) triple into the

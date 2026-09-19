@@ -83,6 +83,21 @@ protocol Subprocess: AnyObject, Sendable {
     /// (`SIGTERM` on POSIX). Idempotent: repeated calls are
     /// no-ops once the child is already gone or has been asked
     /// to stop. Must be safe to call from any queue.
+    /// Like `run(executable:arguments:onBytes:onExit:)`, but keeps the
+    /// child's standard input open for `write(_:)` — for a child that
+    /// serves commands line by line and lives as long as its owner
+    /// (`HingeControl serve`). A conformer that cannot may throw
+    /// `SubprocessError.notInteractive`.
+    func runInteractive(
+        executable: URL,
+        arguments: [String],
+        onBytes: @escaping @Sendable (Data) -> Void,
+        onExit:  @escaping @Sendable (Int32) -> Void
+    ) throws
+
+    /// Feed bytes to a child started with `runInteractive`.
+    func write(_ data: Data) throws
+
     func terminate()
 
     /// Send the signal the child cannot trap, ignore or block
@@ -99,4 +114,18 @@ protocol Subprocess: AnyObject, Sendable {
     /// Idempotent, safe from any queue, and a no-op once the child
     /// is already gone.
     func kill()
+}
+
+enum SubprocessError: Error, Equatable {
+    case notInteractive
+}
+
+extension Subprocess {
+    func runInteractive(
+        executable: URL, arguments: [String],
+        onBytes: @escaping @Sendable (Data) -> Void,
+        onExit: @escaping @Sendable (Int32) -> Void
+    ) throws { throw SubprocessError.notInteractive }
+
+    func write(_ data: Data) throws { throw SubprocessError.notInteractive }
 }

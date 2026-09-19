@@ -149,8 +149,30 @@
       if (value !== previous) {
         rotationDegrees += 90;
       }
-      const wrapper = root.querySelector(':scope > div');
-      if (wrapper) wrapper.style.transform = 'rotate(' + rotationDegrees + 'deg)';
+      for (const wrapper of root.querySelectorAll(':scope > div')) {
+        wrapper.style.transform = 'rotate(' + rotationDegrees + 'deg)';
+      }
+    }
+  }
+
+  // Set an orientation outright, no cycle step and no animation —
+  // for a panel that arrives already turned (a foldable's unfolded
+  // panel is landscape by the guest's choice; its cover is portrait).
+  function snapOrientation(value) {
+    const canonical = { 'portrait': 0, 'landscape-left': 90, 'portrait-upside-down': 180, 'landscape-right': 270 };
+    currentOrientation = value;
+    rotationDegrees = canonical[value] || 0;
+    orientationIndex = Math.max(0, orientationCycle().indexOf(value));
+    const root = document.getElementById('nativeDeviceFrame');
+    if (!root) return;
+    if (value === 'portrait') root.removeAttribute('data-orientation');
+    else                      root.setAttribute('data-orientation', value);
+    for (const wrapper of root.querySelectorAll(':scope > div')) {
+      const t = wrapper.style.transition;
+      wrapper.style.transition = 'none';
+      wrapper.style.transform = 'rotate(' + rotationDegrees + 'deg)';
+      void wrapper.offsetWidth;
+      wrapper.style.transition = t;
     }
   }
 
@@ -330,23 +352,21 @@
         ? window.BaguetteTarget.path(udid, '/definition.json')
             + (chromePick ? '?chrome=' + encodeURIComponent(chromePick) : '')
         : undefined;
+    // A foldable is a book, and its book is Apple's own 3D model
+    // (`V68.usdz`, the one Device Hub draws) posed by the hinge, with
+    // both panels on its screens. Its main view is the live 3D stream
+    // straight on, taps landing on whichever screen is lit, and the
+    // flat chrome never shows for it while the guest is up — the cube
+    // button turns the book instead of leaving 3D. The flat chrome
+    // still carries the power card for a device that is not booted.
+    const hinge = deviceMode ? null : await readHinge();
+    foldable = !!(hinge && hinge.foldable);
+    if (foldable) currentLitPanel = hinge.litPanel || 'primary';
+    if (foldable && isBooted(meta.state)) {
+      document.getElementById('nativeDeviceFrame').setAttribute('data-foldable', '');
+    }
     try {
-      sim = await window.Baguette.use({
-        host: location.origin,
-        udid,
-        definitionURL: deviceDefinitionURL,
-        send: (payload) => {
-          const out = currentOrientation === 'portrait'
-            ? payload
-            : remapEnvelopeToPortrait(payload);
-          const view = document.getElementById('simNativeView');
-          if (view && view.getAttribute('data-render3d') === 'open' &&
-              render3DPanel && render3DPanel.send(out)) return;
-          if (session) session.send(out);
-        },
-        getOrientation: () => currentOrientation,
-        log: (msg) => console.log('[native]', msg),
-      });
+      sim = await useSimulator(deviceDefinitionURL);
       sim.mount(document.getElementById('nativeDeviceFrame'));
     } catch (e) {
       console.warn('[native] no device definition:', (e && e.message) || e);
@@ -380,7 +400,7 @@
     //    the device's own screen instead and start the stream once
     //    the user boots it (or once the boot already underway lands).
     if (sim && isBooted(meta.state)) {
-      startSession(currentFormat());
+      startMainView();
     } else {
       showPowerCard(sim ? meta.state : '');
     }
@@ -417,14 +437,58 @@
     // Only meaningful once the guest is up: an unbooted device has no
     // PurpleWorkspacePort to send the GSEvent to. `resetToPortrait`
     // runs again after a boot completes.
-    if (isBooted(meta.state)) resetToPortrait();
+    //
+    // Not on an open foldable, though. iPhone Duo's unfolded panel is
+    // landscape by the guest's own choice — SpringBoard turns it back
+    // the moment the home screen shows — so forcing portrait would
+    // leave the page fighting the device. The hinge poll says which
+    // way the lit panel faces, and the page takes that instead.
+    if (!foldable && isBooted(meta.state)) {
+      resetToPortrait();
+    }
 
     // Start watching for network conditioning immediately, before the card
     // has ever been opened. A throttle armed from the CLI in another
     // terminal is exactly the one someone forgets about, and this page is
     // where they will be looking when the app feels slow.
     if (!deviceMode) watchNetworkArmed();
+
   }
+
+  // One SDK simulator for a definition URL, wired to this page's
+  // transport: the phone at boot, and a foldable's other panel when the
+  // hinge brings it in.
+  function useSimulator(definitionURL) {
+    return window.Baguette.use({
+      host: location.origin,
+      udid,
+      definitionURL,
+      send: (payload) => {
+        const out = currentOrientation === 'portrait'
+          ? payload
+          : remapEnvelopeToPortrait(payload);
+        const view = document.getElementById('simNativeView');
+        if (view && view.getAttribute('data-render3d') === 'open' &&
+            render3DPanel && render3DPanel.send(out)) return;
+        if (session) session.send(out);
+      },
+      getOrientation: () => currentOrientation,
+      log: (msg) => console.log('[native]', msg),
+    });
+  }
+
+  async function readHinge() {
+    try {
+      const res = await fetch(`/simulators/${encodeURIComponent(udid)}/hinge`);
+      return res.ok ? await res.json() : null;
+    } catch (e) { return null; }
+  }
+
+  /** iPhone Duo: two panels and a hinge. The page shows its book in
+   *  3D — Apple's own model, posed by the hinge, both panels on its
+   *  screens — so nothing here follows the hinge; the 3D scene does. */
+  let foldable = false;
+  let currentLitPanel = 'primary';
 
   function resetToPortrait() {
     if (deviceMode) return; // a physical phone rotates itself
@@ -484,46 +548,55 @@
   // given wire format. Tearing down + restarting is the cheapest way
   // to swap formats — the WS protocol is per-connection and the
   // server's makeStream(...) is keyed at session open.
-  function startSession(format) {
-    // A recording samples the canvas this session paints into; a
-    // restart (format swap, 3D close, device re-open) leaves it blank
-    // for however long the new socket takes to land its first frame.
-    if (session) cancelRecording('stream restarted');
-    if (session) { try { session.stop(); } catch (_) {} session = null; }
-    // Same text-frame router as sim-stream.js: hand JSON envelopes
-    // to the inspector first, then claim paste_result; anything
-    // nobody claims falls through to the decoder's error logger.
-    const onStreamText = (env) => {
-      if (axInspector && axInspector.handleEnvelope(env)) return true;
-      if (env && env.type === 'paste_result') {
-        if (!env.ok) console.warn('[native] paste failed:', env.error || 'unknown');
-        return true;
-      }
-      if (env && env.type === 'copy_result') {
-        console.log(env.ok
-          ? '[native] copied sim pasteboard to host clipboard'
-          : '[native] copy failed: ' + (env.error || 'unknown'));
-        return true;
-      }
-      return false;
-    };
-    session = new window.StreamSession({
-      udid, format, version: 'v2',
-      display: 'phone',
-      canvas: sim.canvas,
+  // Same text-frame router as sim-stream.js: hand JSON envelopes to
+  // the inspector first, then claim paste_result; anything nobody
+  // claims falls through to the decoder's error logger.
+  function routeStreamText(env) {
+    if (env && env.type === 'hinge') return true;   // the 3D scene follows the hinge
+    if (axInspector && axInspector.handleEnvelope(env)) return true;
+    if (env && env.type === 'paste_result') {
+      if (!env.ok) console.warn('[native] paste failed:', env.error || 'unknown');
+      return true;
+    }
+    if (env && env.type === 'copy_result') {
+      console.log(env.ok
+        ? '[native] copied sim pasteboard to host clipboard'
+        : '[native] copy failed: ' + (env.error || 'unknown'));
+      return true;
+    }
+    return false;
+  }
+
+  function sessionCallbacks(onFirstPaint) {
+    let painted = false;
+    return {
       onSize: (w, h) => {
         lastPaintedSize = { w, h };
         // First frame after a boot — the guest is genuinely up, so
         // drop the power card and hand the screen back to the stream.
         hidePowerCard();
+        if (!painted) { painted = true; if (onFirstPaint) onFirstPaint(); }
       },
       onFps:  (fps) => {
         const el = document.getElementById('nativeStatus');
         if (el) el.textContent = fps + ' fps';
       },
       onLog: (msg) => console.log('[native]', msg),
-      onText: onStreamText,
-    });
+      onText: routeStreamText,
+    };
+  }
+
+  function startSession(format) {
+    // A recording samples the canvas this session paints into; a
+    // restart (format swap, 3D close, device re-open) leaves it blank
+    // for however long the new socket takes to land its first frame.
+    if (session) cancelRecording('stream restarted');
+    if (session) { try { session.stop(); } catch (_) {} session = null; }
+    session = new window.StreamSession(Object.assign({
+      udid, format, version: 'v2',
+      display: 'phone',
+      canvas: sim.canvas,
+    }, sessionCallbacks()));
     // `boot()` runs this before wiring the toolbar and unload handler,
     // so a throw here killed the whole page, not just the canvas (#71).
     try {
@@ -1059,9 +1132,26 @@
   // static screen may not composite anything for a while.
   function onBooted() {
     renderPowerCard('starting');
-    startSession(currentFormat());
-    resetToPortrait();
+    startMainView();
+    if (!foldable) resetToPortrait();
     firstFrameTimer = setTimeout(hidePowerCard, FIRST_FRAME_TIMEOUT_MS);
+  }
+
+  // The live view of a booted guest: the flat stream in the device's
+  // chrome, or — on a foldable — the book, straight on.
+  function startMainView() {
+    if (foldable) {
+      const frame = document.getElementById('nativeDeviceFrame');
+      if (frame) frame.setAttribute('data-foldable', '');
+      toggle3D({ fixed: true });
+      // The unfolded panel is landscape-left by the guest's choice and
+      // the cover portrait; the rotate button cycles from there.
+      const start = currentLitPanel === 'secondary' ? 'landscape-left' : 'portrait';
+      currentOrientation = start;
+      orientationIndex = Math.max(0, orientationCycle().indexOf(start));
+      return;
+    }
+    startSession(currentFormat());
   }
 
   // Lazy-mounts the AXInspector once a surface + session are ready.
@@ -1856,6 +1946,15 @@
       const cycle = orientationCycle();
       orientationIndex = (orientationIndex + 1) % cycle.length;
       const value = cycle[orientationIndex];
+      // A foldable's book turns in 3D, as the flat chrome would.
+      if (foldable) {
+        currentOrientation = value;
+        if (render3DPanel) render3DPanel.setInterfaceOrientation(value);
+        const url = '/simulators/' + encodeURIComponent(udid)
+            + '/orientation?value=' + encodeURIComponent(value);
+        fetch(url, { method: 'POST' }).catch(() => { /* best-effort */ });
+        return;
+      }
       // Mirror the rotation in the UI immediately. The CSS
       // transform on `#nativeDeviceFrame > div` rotates the bezel
       // + canvas as one unit, while the input + overlay wrappers
@@ -2092,13 +2191,26 @@
   // Live 3D is a main-view mode, not a duplicate preview. Its WebSocket
   // replaces the 2D StreamSession while open and carries both MJPEG
   // frames and the same inbound input/control envelopes.
-  function toggle3D() {
+  function toggle3D(opts) {
     const view = document.getElementById('simNativeView');
     const host = document.getElementById('native3DHost');
     const stage = document.getElementById('native3DStage');
     const btn = document.getElementById('native3DToggle');
     const open = view && view.getAttribute('data-render3d') === 'open';
     if (!view || !host || !stage || !sim) return;
+    const fixed = !!(opts && opts.fixed);
+    // A foldable lives in 3D: the cube turns the book, or sets it back
+    // straight, rather than leaving for the flat stream.
+    if (open && foldable && render3DPanel && !fixed) {
+      render3DPanel.setFixed(!render3DPanel.fixed);
+      if (btn) btn.classList.toggle('active', !render3DPanel.fixed);
+      const inspector = !render3DPanel.fixed && localStorage.getItem('asc.3dInspector') !== 'closed';
+      if (inspector) view.setAttribute('data-render3d-inspector', 'open');
+      else view.removeAttribute('data-render3d-inspector');
+      const sheet = document.getElementById('native3DSheet');
+      if (sheet) sheet.setAttribute('aria-hidden', inspector ? 'false' : 'true');
+      return;
+    }
     // The canvas being recorded is about to be swapped for the other
     // mode's, and the two are different surfaces at different sizes.
     cancelRecording('switched between 2D and 3D');
@@ -2116,13 +2228,13 @@
         session = null;
       }
       view.setAttribute('data-render3d', 'open');
-      const inspectorOpen = localStorage.getItem('asc.3dInspector') !== 'closed';
+      const inspectorOpen = !fixed && localStorage.getItem('asc.3dInspector') !== 'closed';
       if (inspectorOpen) {
         view.setAttribute('data-render3d-inspector', 'open');
       }
       const sheet = document.getElementById('native3DSheet');
       if (sheet) sheet.setAttribute('aria-hidden', inspectorOpen ? 'false' : 'true');
-      if (btn) btn.classList.add('active');
+      if (btn) btn.classList.toggle('active', !fixed);
       const status = document.getElementById('nativeStatus');
       if (status) status.textContent = '3D live';
       // Told BEFORE the stream starts: a picked size raises the
@@ -2138,6 +2250,7 @@
           deviceSize: { width: sim.screen.size.width, height: sim.screen.size.height },
           format: currentFormat(),
           background: live3DBackground(),
+          fixed,
           onFps: (fps) => {
             const status = document.getElementById('nativeStatus');
             if (status) status.textContent = fps + ' fps · 3D';
@@ -2145,6 +2258,7 @@
         });
       } else if (render3DPanel) {
         render3DPanel.background = live3DBackground();
+        if (render3DPanel.fixed !== fixed) render3DPanel.setFixed(fixed, { silent: true });
         render3DPanel.start();
       }
     }

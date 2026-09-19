@@ -539,6 +539,40 @@ struct Server: Sendable {
                             body: .init(byteBuffer: ByteBuffer(string: json)))
         }
 
+        // Hinge — a foldable's pose. The page polls this on iPhone Duo so
+        // that when Device Hub folds or unfolds the device, the stream,
+        // the bezel and the tap space follow the newly lit panel; every
+        // other device answers `foldable:false` once and is never asked
+        // again.
+        router.get("/simulators/:udid/hinge") { [simulators, chromes] r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            guard let json = Self.hingeJSON(
+                udid: Self.udidParam(r), simulators: simulators, chromes: chromes
+            ) else {
+                return errorJSON("unknown udid: \(Self.udidParam(r))", status: .notFound)
+            }
+            return Self.jsonResponse(json)
+        }
+        // Move the hinge — Device Hub's pose picker, over HTTP:
+        // `?pose=closed|open|flat` or `?angle=<0–180>`, `&duration=<s>`.
+        // Blocks for the sweep (Device Hub's 0.8 s by default).
+        router.post("/simulators/:udid/hinge") { [simulators] r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            let q = r.uri.queryParameters
+            switch Self.driveHinge(
+                udid: Self.udidParam(r), pose: q.get("pose"), angle: q.get("angle"),
+                duration: q.get("duration"), simulators: simulators
+            ) {
+            case .ok:
+                return jsonOK
+            case .invalid(let reason):
+                return errorJSON(Self.hingeCommandMessage(reason), status: .badRequest)
+            case .unknownDevice:
+                return errorJSON("unknown udid: \(Self.udidParam(r))", status: .notFound)
+            case .failed(let error):
+                return errorJSON("hinge could not be driven: \(error)", status: .internalServerError)
+            }
+        }
         // Chrome / bezel — DeviceKit-sourced layout + rasterized PNG.
         router.get("/simulators/:udid/chrome.json") { [simulators, chromes] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
@@ -550,7 +584,30 @@ struct Server: Sendable {
         // page consumes the SDK this route becomes the only chrome read.
         router.get("/simulators/:udid/definition.json") { [simulators, chromes] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
-            return Self.definitionJSON(udid: Self.udidParam(r), simulators: simulators, chromes: chromes)
+            return Self.definitionJSON(
+                udid: Self.udidParam(r), simulators: simulators, chromes: chromes,
+                panel: Self.panelQuery(r.uri.queryParameters.get("panel").map { String($0) }))
+        }
+        // The lit panel's framebuffer mask — the shape the simulator
+        // clips that screen to. 404 when the chrome names none; the page
+        // then rounds by `clipRadius` as it always has.
+        router.get("/simulators/:udid/screen-mask.png") { [simulators, chromes] r, _ in
+            if let rejected = rejectUntrustedBrowser(r) { return rejected }
+            guard let bytes = Self.screenMaskImage(
+                udid: Self.udidParam(r), simulators: simulators, chromes: chromes,
+                panel: Self.panelQuery(r.uri.queryParameters.get("panel").map { String($0) })
+            ) else {
+                return Response(
+                    status: .notFound,
+                    headers: [.contentType: "text/plain"],
+                    body: .init(byteBuffer: ByteBuffer(string: "no screen mask for \(Self.udidParam(r))"))
+                )
+            }
+            return Response(
+                status: .ok,
+                headers: [.contentType: "image/png", .cacheControl: "no-cache"],
+                body: .init(byteBuffer: ByteBuffer(data: bytes))
+            )
         }
         router.get("/simulators/:udid/bezel.png") { [simulators, chromes] r, _ in
             if let rejected = rejectUntrustedBrowser(r) { return rejected }
@@ -564,7 +621,8 @@ struct Server: Sendable {
                 udid: Self.udidParam(r),
                 simulators: simulators,
                 chromes: chromes,
-                withButtons: withButtons
+                withButtons: withButtons,
+                panel: Self.panelQuery(r.uri.queryParameters.get("panel").map { String($0) })
             )
         }
         // Per-button rasterized PNG — feeds the actionable-bezel UI.
@@ -590,7 +648,8 @@ struct Server: Sendable {
                 udid: udid,
                 buttonFile: last,
                 simulators: simulators,
-                chromes: chromes
+                chromes: chromes,
+                panel: Self.panelQuery(r.uri.queryParameters.get("panel").map { String($0) })
             )
         }
 
@@ -766,13 +825,15 @@ struct Server: Sendable {
         router.ws(
             "/simulators/:udid/stream",
             shouldUpgrade: trustedWebSocketUpgrade
-        ) { [simulators] inbound, outbound, context in
+        ) { [simulators, chromes] inbound, outbound, context in
             await Self.streamWS(
                 udid: Self.udidParam(context.request),
                 format: context.request.uri.queryParameters.get("format")
                     .flatMap { StreamFormat(rawValue: $0) } ?? .mjpeg,
                 displayQuery: context.request.uri.queryParameters.get("display"),
+                panelQuery: context.request.uri.queryParameters.get("panel").map { String($0) },
                 simulators: simulators,
+                chromes: chromes,
                 inbound: inbound,
                 outbound: outbound
             )
@@ -1474,6 +1535,89 @@ struct Server: Sendable {
     /// Reporting an unknown device as one with no conditioning would read
     /// as reassurance about a simulator that doesn't exist, which is the
     /// wrong answer to give a badge whose whole job is being believed.
+    /// `?panel=` on an image route: the panel the definition named.
+    /// Anything else is ignored and the hinge decides, as before.
+    static func panelQuery(_ raw: String?) -> IntegratedPanel? {
+        switch raw {
+        case "primary": return .primary
+        case "secondary": return .secondary
+        default: return nil
+        }
+    }
+
+    enum HingeDriveOutcome: Equatable {
+        case ok
+        case invalid(HingeCommandError)
+        case unknownDevice
+        case failed(HingeError)
+    }
+
+    /// Pure dispatch for `POST /simulators/:udid/hinge` and the 3D
+    /// socket's `set_pose`: parse the pose or angle, find the device,
+    /// sweep its hinge. Blocks for the sweep.
+    static func driveHinge(
+        udid: String, pose: String?, angle: String?, duration: String?,
+        simulators: any Simulators
+    ) -> HingeDriveOutcome {
+        let command: HingeCommand
+        do {
+            command = try HingeCommand.parse(pose: pose, angle: angle, duration: duration)
+        } catch let error as HingeCommandError {
+            return .invalid(error)
+        } catch {
+            return .invalid(.missingTarget)
+        }
+        guard !udid.isEmpty, let sim = simulators.find(udid: udid) else {
+            return .unknownDevice
+        }
+        do {
+            try sim.hinge().fold(to: command.degrees, over: command.duration)
+            return .ok
+        } catch let error as HingeError {
+            return .failed(error)
+        } catch {
+            return .failed(.toolFailed(status: -1))
+        }
+    }
+
+    static func hingeCommandMessage(_ error: HingeCommandError) -> String {
+        switch error {
+        case .missingTarget: return "pose=closed|open|flat or angle=<0-180> is required"
+        case .unknownPose(let pose): return "unknown pose \(pose): expected closed, open or flat"
+        case .angleOutOfRange: return "angle must be a number from 0 to 180"
+        case .invalidDuration: return "duration must be a non-negative number of seconds"
+        }
+    }
+
+    /// One hinge sample as the stream socket pushes it to the page.
+    static func hingeMessage(_ angle: HingeAngle) -> String {
+        #"{"type":"hinge","angleDegrees":\#(angle.degrees)}"#
+    }
+
+    /// Pure data producer for `GET /simulators/<udid>/hinge`.
+    ///
+    /// `foldable` comes from the profile (does the device have a second
+    /// panel), `angleDegrees` from the hinge — `null` when no reading
+    /// arrived, which on a foldable means "as booted" — and `litPanel`
+    /// is the one the chrome, screen and tap space currently describe.
+    /// A single-panel device's hinge is never consulted.
+    static func hingeJSON(
+        udid: String, simulators: any Simulators, chromes: any Chromes
+    ) -> String? {
+        guard !udid.isEmpty, let sim = simulators.find(udid: udid) else { return nil }
+        let foldable = chromes.panels(forDeviceName: sim.deviceTypeName).contains(.secondary)
+        let angle = foldable ? sim.hinge().angle() : nil
+        let degrees = angle.map { "\($0.degrees)" } ?? "null"
+        let lit = angle?.litPanel ?? .primary
+        // The guest turns the unfolded panel to landscape on its own, so
+        // the page has to be told which way it faces; the binding of the
+        // phone plane carries what Connected Screens reports.
+        let orientation = (foldable ? try? sim.displays().phone.resolve() : nil)?
+            .orientation.map { "\"\($0.wireName)\"" } ?? "null"
+        return #"{"ok":true,"foldable":\#(foldable),"angleDegrees":\#(degrees),"#
+            + #""litPanel":"\#(lit == .primary ? "primary" : "secondary")","orientation":\#(orientation)}"#
+    }
+
     static func networkStateJSON(udid: String, simulators: any Simulators) async -> String? {
         let profiles = NetworkProfile.allCases
             .map { "\"\($0.rawValue)\"" }
@@ -1680,10 +1824,11 @@ struct Server: Sendable {
     private static func definitionJSON(
         udid: String,
         simulators: any Simulators,
-        chromes: any Chromes
+        chromes: any Chromes,
+        panel: IntegratedPanel? = nil
     ) -> Response {
         guard let json = definitionJSONString(
-            udid: udid, simulators: simulators, chromes: chromes
+            udid: udid, simulators: simulators, chromes: chromes, panel: panel
         ) else {
             return errorJSON("no definition for udid \(udid)", status: .notFound)
         }
@@ -1723,16 +1868,25 @@ struct Server: Sendable {
     static func definitionJSONString(
         udid: String,
         simulators: any Simulators,
-        chromes: any Chromes
+        chromes: any Chromes,
+        panel pinned: IntegratedPanel? = nil
     ) -> String? {
-        guard !udid.isEmpty, let sim = simulators.find(udid: udid),
-              let assets = sim.chrome(in: chromes) else {
-            return nil
+        guard !udid.isEmpty, let sim = simulators.find(udid: udid) else { return nil }
+        // Resolve the panel once: it names the chrome and it says
+        // whether the screen is a foldable's creased, unfolded one. A
+        // page bringing the other panel in names it; otherwise the hinge.
+        let panel = pinned ?? sim.litPanel(in: chromes)
+        let assets: DeviceChromeAssets?
+        switch panel {
+        case .primary:   assets = chromes.assets(forDeviceName: sim.deviceTypeName)
+        case .secondary: assets = chromes.assets(forDeviceName: sim.deviceTypeName, panel: .secondary)
         }
+        guard let assets else { return nil }
         let def = SimulatorDefinition.compose(
             from: sim,
             chrome: assets,
-            urlPrefix: "/simulators/\(udid)"
+            urlPrefix: "/simulators/\(udid)",
+            panel: panel
         )
         return def.toJSON()
     }
@@ -1847,6 +2001,52 @@ struct Server: Sendable {
             return nil
         }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// A foldable's lit screen as flat pieces — the unfolded panel bends
+    /// at the hinge — each with its corners in the framebuffer's order
+    /// and the part of the buffer it shows. Sent in `screen_quad`'s
+    /// place whenever the pose or the camera changes.
+    static func screenPiecesJSON(
+        _ pieces: [ScreenPiece], buttons: [ScreenButtonMark] = [], litPanel: IntegratedPanel? = nil,
+        pose: FoldablePose? = nil
+    ) -> String? {
+        var object: [String: Any] = [
+            "type": "screen_quad",
+            "buttons": buttons.map {
+                ["id": $0.id, "at": [$0.at.u, $0.at.v], "control": [$0.control.u, $0.control.v]]
+            },
+            "pieces": pieces.map { piece -> [String: Any] in
+                let q = piece.quad
+                return [
+                    "corners": [
+                        [q.topLeft.u, q.topLeft.v],
+                        [q.topRight.u, q.topRight.v],
+                        [q.bottomRight.u, q.bottomRight.v],
+                        [q.bottomLeft.u, q.bottomLeft.v],
+                    ],
+                    "u": [piece.u.lowerBound, piece.u.upperBound],
+                    "v": [piece.v.lowerBound, piece.v.upperBound],
+                ]
+            },
+        ]
+        if let litPanel { object["litPanel"] = litPanel == .primary ? "primary" : "secondary" }
+        if let pose { object["pose"] = ["hingeDegrees": pose.hingeDegrees] }
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// `screen_quad` for whatever the scene projects: a foldable's pieces
+    /// when it has them, else the one quad.
+    static func screenPlacementJSON(_ scene: any DeviceScene, pose: FoldablePose? = nil) -> String? {
+        if let pieces = scene.screenPieces {
+            return screenPiecesJSON(
+                pieces, buttons: scene.screenButtons ?? [], litPanel: scene.litPanel, pose: pose)
+        }
+        if let quad = scene.screenQuad { return screenQuadJSON(quad) }
+        return nil
     }
 
     static func model3DJSONString(
@@ -2416,11 +2616,12 @@ struct Server: Sendable {
         udid: String,
         simulators: any Simulators,
         chromes: any Chromes,
-        withButtons: Bool = true
+        withButtons: Bool = true,
+        panel: IntegratedPanel? = nil
     ) -> Response {
         guard let bytes = bezelImage(
             udid: udid, simulators: simulators,
-            chromes: chromes, withButtons: withButtons
+            chromes: chromes, withButtons: withButtons, panel: panel
         ) else {
             return Response(
                 status: .notFound,
@@ -2448,24 +2649,50 @@ struct Server: Sendable {
         udid: String,
         simulators: any Simulators,
         chromes: any Chromes,
-        withButtons: Bool
+        withButtons: Bool,
+        panel: IntegratedPanel? = nil
     ) -> Data? {
         guard !udid.isEmpty, let sim = simulators.find(udid: udid),
-              let assets = sim.chrome(in: chromes) else {
+              let assets = chrome(of: sim, in: chromes, panel: panel) else {
             return nil
         }
         return withButtons ? assets.composite.data : assets.bareComposite.data
+    }
+
+    /// The named panel's chrome when the URL names one, else the lit
+    /// panel's.
+    private static func chrome(
+        of sim: any Simulator, in chromes: any Chromes, panel: IntegratedPanel?
+    ) -> DeviceChromeAssets? {
+        if let panel { return sim.chrome(in: chromes, panel: panel) }
+        return sim.chrome(in: chromes)
+    }
+
+    /// Pure data producer for `screen-mask.png`: the lit panel's mask,
+    /// or `nil` when the chrome carries none.
+    static func screenMaskImage(
+        udid: String,
+        simulators: any Simulators,
+        chromes: any Chromes,
+        panel: IntegratedPanel? = nil
+    ) -> Data? {
+        guard !udid.isEmpty, let sim = simulators.find(udid: udid),
+              let assets = chrome(of: sim, in: chromes, panel: panel) else {
+            return nil
+        }
+        return assets.screenMask?.data
     }
 
     private static func chromeButtonPNG(
         udid: String,
         buttonFile: String,
         simulators: any Simulators,
-        chromes: any Chromes
+        chromes: any Chromes,
+        panel: IntegratedPanel? = nil
     ) -> Response {
         guard let bytes = chromeButtonImage(
             udid: udid, buttonFile: buttonFile,
-            simulators: simulators, chromes: chromes
+            simulators: simulators, chromes: chromes, panel: panel
         ) else {
             return Response(
                 status: .notFound,
@@ -2492,10 +2719,11 @@ struct Server: Sendable {
         udid: String,
         buttonFile: String,
         simulators: any Simulators,
-        chromes: any Chromes
+        chromes: any Chromes,
+        panel: IntegratedPanel? = nil
     ) -> Data? {
         guard !udid.isEmpty, let sim = simulators.find(udid: udid),
-              let assets = sim.chrome(in: chromes) else {
+              let assets = chrome(of: sim, in: chromes, panel: panel) else {
             return nil
         }
         let name: String = {
@@ -2558,17 +2786,47 @@ struct Server: Sendable {
             quality: 0.7
         )
         // 3D stays phone-only; ignore any display=carplay on these routes.
-        let bound: (screen: any Screen, input: any Input)
-        do {
-            bound = try StreamDisplayPlan.phoneOnly.bind(to: sim)
-        } catch {
-            try? await outbound.write(.text(
-                #"{"ok":false,"error":"\#(jsonEscape(String(describing: error)))"}"#
-            ))
-            return
+        let screen: any Screen
+        let input: any Input
+        let refresh: () -> Void
+        var foldable: RenderedFoldable?
+        if plan.model.definition.scene.fold != nil {
+            // A foldable: both panels on the book's two screens, the
+            // hinge posing it; taps follow the lit panel as everywhere.
+            let unfolded = sim.displays().panel(.secondary)
+            let cover = sim.displays().panel(.primary)
+            final class Box: @unchecked Sendable { var book: RenderedFoldable? }
+            let box = Box()
+            let book = RenderedFoldable(
+                unfolded: unfolded.screen(), cover: cover.screen(),
+                hinge: sim.hinge(), scene: scene,
+                onPose: {
+                    // The lit screen moved: tell the page where it is.
+                    if let json = screenPlacementJSON(scene, pose: box.book?.pose) {
+                        Task { try? await outbound.write(.text(json)) }
+                    }
+                }
+            )
+            box.book = book
+            foldable = book
+            screen = book
+            input = sim.input()
+            refresh = { book.refresh() }
+        } else {
+            let bound: (screen: any Screen, input: any Input)
+            do {
+                bound = try StreamDisplayPlan.phoneOnly.bind(to: sim)
+            } catch {
+                try? await outbound.write(.text(
+                    #"{"ok":false,"error":"\#(jsonEscape(String(describing: error)))"}"#
+                ))
+                return
+            }
+            let rendered = RenderedScreen(source: bound.screen, scene: scene)
+            screen = rendered
+            input = bound.input
+            refresh = { rendered.refresh() }
         }
-        let screen = RenderedScreen(source: bound.screen, scene: scene)
-        let input = bound.input
         let pasteboard = sim.pasteboard()
         let dispatcher = GestureDispatcher(input: input)
         do {
@@ -2583,7 +2841,7 @@ struct Server: Sendable {
             stream.stop()
         }
 
-        if let quad = scene.screenQuad, let json = screenQuadJSON(quad) {
+        if let json = screenPlacementJSON(scene, pose: foldable?.pose) {
             try? await outbound.write(.text(json))
         }
 
@@ -2596,9 +2854,24 @@ struct Server: Sendable {
                         line: line,
                         scene: scene
                     ) {
-                        screen.refresh()
-                        if let quad = scene.screenQuad, let json = screenQuadJSON(quad) {
+                        refresh()
+                        if let json = screenPlacementJSON(scene, pose: foldable?.pose) {
                             try? await outbound.write(.text(json))
+                        }
+                        continue
+                    }
+                    // The pose picker: the device's own hinge is swept
+                    // there (a second or so, off this loop); the book
+                    // follows the hinge samples as it goes.
+                    if foldable != nil, let pose = try Device3DPose.parsing(json: Data(line.utf8)) {
+                        if case .fold(let degrees) = pose {
+                            let target = String(degrees)
+                            Task.detached {
+                                let outcome = Self.driveHinge(
+                                    udid: udid, pose: nil, angle: target, duration: nil,
+                                    simulators: simulators)
+                                if outcome != .ok { log("hinge: \(outcome)") }
+                            }
                         }
                         continue
                     }
@@ -2634,7 +2907,9 @@ struct Server: Sendable {
         udid: String,
         format: StreamFormat,
         displayQuery: String?,
+        panelQuery: String? = nil,
         simulators: any Simulators,
+        chromes: any Chromes,
         inbound: WebSocketInboundStream,
         outbound: WebSocketOutboundWriter
     ) async {
@@ -2643,7 +2918,7 @@ struct Server: Sendable {
             return
         }
 
-        let displayPlan = StreamDisplayPlan.from(query: displayQuery)
+        let displayPlan = StreamDisplayPlan.from(query: displayQuery, panel: panelQuery)
         let bound: (screen: any Screen, input: any Input)
         do {
             bound = try displayPlan.bind(to: sim)
@@ -2681,7 +2956,20 @@ struct Server: Sendable {
             ))
             return
         }
+        // A foldable's hinge rides the same socket: every sample Device
+        // Hub sweeps through lands here as `{"type":"hinge",…}`, so the
+        // page can draw the fold at the angle the device is at and knows
+        // the moment the lit panel is about to change. A phone has no
+        // hinge and is not watched.
+        let foldable = displayPlan.kind == .phone
+            && chromes.panels(forDeviceName: sim.deviceTypeName).contains(.secondary)
+        let hingeWatch: (any HingeWatch)? = foldable
+            ? sim.hinge().watch { angle in
+                Task { try? await outbound.write(.text(Self.hingeMessage(angle))) }
+            }
+            : nil
         defer {
+            hingeWatch?.cancel()
             stream.stop()
             screen.stop()
         }

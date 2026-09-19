@@ -67,7 +67,7 @@ enum InjectedDylibInstaller {
               let bundle = Bundle(url: bundleURL) else { return nil }
         return bundle.url(
             forResource: dylib.name,
-            withExtension: "dylib",
+            withExtension: dylib.kind == .dylib ? "dylib" : nil,
             subdirectory: dylib.name
         )
     }

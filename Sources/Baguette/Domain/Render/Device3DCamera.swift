@@ -3,6 +3,16 @@ import Foundation
 struct Device3DCamera: Equatable, Sendable {
     let rotation: DeviceRotation
     let zoom: Double
+    /// The guest's interface orientation, when the page turned a
+    /// foldable and knows it: the lit screen's pieces are then ordered
+    /// as that framebuffer is drawn. nil leaves the scene's assumption.
+    let orientation: DeviceOrientation?
+
+    init(rotation: DeviceRotation, zoom: Double, orientation: DeviceOrientation? = nil) {
+        self.rotation = rotation
+        self.zoom = zoom
+        self.orientation = orientation
+    }
 
     static func parsing(json: Data) throws -> Device3DCamera? {
         let object: [String: Any]
@@ -23,9 +33,17 @@ struct Device3DCamera: Equatable, Sendable {
               (0.5...3).contains(zoom) else {
             throw DeviceModelError.invalidRenderOptions
         }
+        var orientation: DeviceOrientation?
+        if let name = object["orientation"] {
+            guard let text = name as? String, let parsed = DeviceOrientation(wireName: text) else {
+                throw DeviceModelError.invalidRenderOptions
+            }
+            orientation = parsed
+        }
         return Device3DCamera(
             rotation: DeviceRotation(x: x, y: y, z: z),
-            zoom: zoom
+            zoom: zoom,
+            orientation: orientation
         )
     }
 

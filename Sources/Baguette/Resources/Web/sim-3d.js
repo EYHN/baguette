@@ -18,6 +18,13 @@
     this.rotation = { x: -8, y: 18, z: 0 };
     this.zoom = 1;
     this.mode = 'pose';
+    // Fixed: the device seen straight on, taps landing on its screen,
+    // no orbiting and no stage tools — the view a foldable gets by
+    // default, since its book is drawn from the same model the free
+    // 3D view orbits.
+    this.fixed = false;
+    this.litPanel = null;
+    this.interfaceOrientation = null;
     this.variants = {};
     this.screenGlass = false;
     // The size/fit/background the user picked in the toolbar, shared with
@@ -56,6 +63,7 @@
     this.onFps = options.onFps || null;
     this.format = options.format === 'avcc' ? 'avcc' : 'mjpeg';
     this.background = options.background || this.background;
+    if (options.fixed) this.setFixed(true, { silent: true });
     this.renderLoading('Loading 3D model…');
     try {
       const targetPath = (u, rest) => (window.BaguetteTarget
@@ -121,8 +129,31 @@
     });
   };
 
+  /**
+   * Straight on and still (fixed), or orbiting under the pointer (free).
+   * Switching keeps the socket: only the camera and the mode change.
+   */
+  Sim3DPanel.prototype.setFixed = function (fixed, opts) {
+    this.fixed = !!fixed;
+    if (this.stage) this.stage.dataset.fixed = this.fixed ? 'true' : 'false';
+    if (this.fixed) {
+      this.rotation = { x: 0, y: 0, z: 0 };
+      this.zoom = 1;
+      this.mode = 'interact';
+    } else {
+      this.rotation = { x: -8, y: 18, z: 0 };
+      this.zoom = 1;
+      this.mode = 'pose';
+    }
+    if (opts && opts.silent) return;
+    this.setMode(this.mode);
+    this.syncCameraControls();
+    this.sendCamera();
+  };
+
   Sim3DPanel.prototype.mountStage = function () {
     if (!this.stage) return;
+    this.stage.dataset.fixed = this.fixed ? 'true' : 'false';
     this.stage.innerHTML =
         '<canvas class="r3d-live-canvas" aria-label="Live 3D simulator"></canvas>' +
         '<div class="r3d-stage-tools" aria-label="3D interaction mode">' +
@@ -168,6 +199,117 @@
     this.setMode(this.mode);
   };
 
+  /**
+   * The model's hardware buttons, where the server says they land in
+   * the frame: a control per button, pressed like the flat chrome's.
+   * Shown while the pointer is over the stage, as Device Hub shows
+   * them; the server moves them as the book turns.
+   */
+  Sim3DPanel.prototype.placeButtons = function (buttons) {
+    if (!this.stage || !this.canvas) return;
+    let host = this.stage.querySelector('[data-role="hw-buttons"]');
+    if (!buttons.length) { if (host) host.remove(); return; }
+    if (!host) {
+      host = document.createElement('div');
+      host.dataset.role = 'hw-buttons';
+      host.className = 'r3d-hw-buttons';
+      this.stage.appendChild(host);
+    }
+    const GLYPH = {
+      'power': '\u23FB', 'action': '\u25CE',
+      'volume-up': '\uD83D\uDD0A+', 'volume-down': '\uD83D\uDD09\u2212',
+    };
+    const LABEL = {
+      'power': 'Sleep/Wake', 'action': 'Camera Control',
+      'volume-up': 'Volume Up', 'volume-down': 'Volume Down',
+    };
+    const rect = window.Baguette._ScreenQuad.contentRect(this.canvas);
+    const stageRect = this.stage.getBoundingClientRect();
+    const seen = new Set();
+    buttons.forEach((b) => {
+      if (!b || !b.id || !Array.isArray(b.at)) return;
+      seen.add(b.id);
+      let el = host.querySelector('[data-hw="' + b.id + '"]');
+      if (!el) {
+        el = document.createElement('button');
+        el.type = 'button';
+        el.dataset.hw = b.id;
+        el.className = 'r3d-hw-button';
+        el.title = LABEL[b.id] || b.id;
+        el.setAttribute('aria-label', el.title);
+        el.textContent = GLYPH[b.id] || b.id;
+        el.addEventListener('click', (event) => {
+          event.stopPropagation();
+          this.send({ type: 'button', button: b.id });
+        });
+        host.appendChild(el);
+      }
+      // The control sits beside the device, off the button's edge.
+      const spot = Array.isArray(b.control) ? b.control : b.at;
+      el.style.left = (rect.left - stageRect.left + spot[0] * rect.width) + 'px';
+      el.style.top = (rect.top - stageRect.top + spot[1] * rect.height) + 'px';
+    });
+    host.querySelectorAll('[data-hw]').forEach((el) => {
+      if (!seen.has(el.dataset.hw)) el.remove();
+    });
+  };
+
+  /**
+   * Device Hub's pose picker, under the book: shut, open (its 130°
+   * book pose) and flat. A pick moves the device's own hinge there —
+   * the server sweeps it as Device Hub would — and the book follows the
+   * hinge as it goes; the pose nearest the hinge lights up.
+   */
+  Sim3DPanel.prototype.placePosePicker = function (pose) {
+    if (!this.stage) return;
+    let host = this.stage.querySelector('[data-role="pose-picker"]');
+    if (!pose) { if (host) host.remove(); return; }
+    const POSES = [
+      { id: 'shut', degrees: 0, label: 'Closed', glyph: this.poseGlyph('shut') },
+      { id: 'open', degrees: 130, label: 'Open', glyph: this.poseGlyph('open') },
+      { id: 'flat', degrees: 180, label: 'Flat', glyph: this.poseGlyph('flat') },
+    ];
+    if (!host) {
+      host = document.createElement('div');
+      host.dataset.role = 'pose-picker';
+      host.className = 'r3d-pose-picker';
+      host.setAttribute('aria-label', 'Pose');
+      POSES.forEach((p) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.pose = p.id;
+        btn.title = p.label;
+        btn.setAttribute('aria-label', p.label);
+        btn.innerHTML = p.glyph;
+        btn.addEventListener('click', () => {
+          this.send({ type: 'set_pose', hingeDegrees: p.degrees });
+        });
+        host.appendChild(btn);
+      });
+      this.stage.appendChild(host);
+    }
+    // Nearest pose to the angle shown lights up.
+    const deg = Number(pose.hingeDegrees);
+    const nearest = POSES.reduce((a, b) =>
+      Math.abs(b.degrees - deg) < Math.abs(a.degrees - deg) ? b : a);
+    host.dataset.active = nearest.id;
+    host.querySelectorAll('[data-pose]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.pose === nearest.id);
+    });
+  };
+
+  /** Device Hub's three pose glyphs: a shut phone, an open book, a flat slab. */
+  Sim3DPanel.prototype.poseGlyph = function (id) {
+    const base = 'width="20" height="16" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"';
+    if (id === 'shut') {
+      return '<svg ' + base + '><rect x="6.5" y="1" width="7" height="14" rx="2"/></svg>';
+    }
+    if (id === 'open') {
+      return '<svg ' + base + '><path d="M2.5 3.5 L10 1.5 L17.5 3.5 V13.5 L10 14.5 L2.5 13.5 Z"/><path d="M10 1.5 V14.5"/></svg>';
+    }
+    return '<svg ' + base + '><rect x="1.5" y="2" width="17" height="12" rx="2"/></svg>';
+  };
+
   Sim3DPanel.prototype.start = function () {
     this.stop();
     if (!this.canvas || !this.model) return;
@@ -210,7 +352,12 @@
       onText: (envelope) => {
         if (generation !== this.generation) return false;
         if (envelope && envelope.type === 'screen_quad') {
-          this.screenQuad = window.Baguette._ScreenQuad.fromCorners(envelope.corners);
+          // One quad for a phone; a foldable's lit screen in pieces.
+          const pieces = window.Baguette._ScreenPieces.fromMessage(envelope);
+          this.screenQuad = pieces.length ? pieces : null;
+          if (envelope.litPanel) this.litPanel = envelope.litPanel;
+          this.placeButtons(Array.isArray(envelope.buttons) ? envelope.buttons : []);
+          this.placePosePicker(envelope.pose || null);
           return true;
         }
         if (envelope && envelope.type === 'gyro') {
@@ -694,12 +841,25 @@
     if (this.cameraFrame) return;
     this.cameraFrame = requestAnimationFrame(() => {
       this.cameraFrame = 0;
-      this.send({
+      const envelope = {
         type: 'set_3d_camera',
         rotation: this.rotation,
         zoom: this.zoom,
-      });
+      };
+      if (this.interfaceOrientation) envelope.orientation = this.interfaceOrientation;
+      this.send(envelope);
     });
+  };
+
+  /**
+   * A foldable turned by the page's rotate button, as a phone's chrome
+   * turns: the server rolls the book to stand the way the guest is
+   * about to be held (`InterfaceRoll`), and the page tells the guest.
+   * Nothing is read back — a rotation made in Device Hub is its own.
+   */
+  Sim3DPanel.prototype.setInterfaceOrientation = function (value) {
+    this.interfaceOrientation = value;
+    this.sendCamera();
   };
 
   Sim3DPanel.prototype.syncCameraControls = function () {

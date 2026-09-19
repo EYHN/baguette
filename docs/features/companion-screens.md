@@ -329,11 +329,22 @@ The other entry in that list worth naming is `1073741825`
 crashed anything — it just delivered CarPlay's touches to the phone,
 which is the harder failure to spot.
 
-So `DisplayTouchTarget` returns constants for both planes and consults
-nothing. And `warmServices` fails closed: if the CarPlay service cannot
-be created, `ensureWarm` returns no client and every gesture is dropped,
-because dispatching to an unregistered target is not a degraded mode —
-it is a dead simulator.
+That "something else" has since been read out of `SimulatorHID`:
+`createDigitizerForTargetID:withDisplayUID:isBuiltIn:` registers every
+Integrated screen's `ScreenTouchService` under `0x40000000 | screenId`
+— the mask bit is what the create message must carry — and `0x32` is a
+second slot the same call fills for a *built-in* panel, last one
+created wins. So `0x40000001` is the phone panel's own registration,
+which is exactly why CarPlay's taps ended up on the phone. The
+distinction only bites on a foldable, where two panels fight over the
+slot; see [`iphone-duo.md`](iphone-duo.md).
+
+So `DisplayTouchTarget` addresses a registration for both planes and
+computes nothing from a screen that is not Integrated. And
+`warmServices` fails closed: if the CarPlay service cannot be created,
+`ensureWarm` returns no client and every gesture is dropped, because
+dispatching to an unregistered target is not a degraded mode — it is a
+dead simulator.
 
 ### Why the target is resolved once
 
@@ -360,7 +371,7 @@ and each wrong answer is worth keeping because each one looked right.
 | Target sent | Where it came from | What happened |
 | --- | --- | --- |
 | `0x40000002` | `IndigoHIDTargetForScreen(screenId)` | unregistered → guest throws → guest restarts |
-| `0x40000001` | `1` plus an invented `0x40000000` flag | registered by *something else* → CarPlay's taps drove the phone |
+| `0x40000001` | `1` plus an invented `0x40000000` flag | the phone panel's own digitizer (screen 1 under the mask bit) → CarPlay's taps drove the phone |
 | **`1`** | what the create message actually registers | works |
 
 Along the way two real bugs were fixed that were not this bug: a session

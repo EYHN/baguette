@@ -7,7 +7,17 @@ import ObjectiveC
 /// otherwise the port's default width/height. Never calls
 /// `updateIOPorts` when framebuffer display ports already exist.
 enum SimulatorKitFramebufferPorts {
+    /// SimulatorKit materialises a device's IO ports lazily, reading
+    /// their descriptors through file handles it closes as it goes; two
+    /// threads enumerating at once have raised
+    /// `-[NSConcreteFileHandle readDataOfLength:]: Bad file descriptor`
+    /// out of it, an ObjC exception no Swift frame can catch. One
+    /// enumeration at a time.
+    private static let enumerationLock = NSLock()
+
     static func sizedPorts(udid: String, host: any DeviceHost) throws -> [SizedFramebufferPort] {
+        enumerationLock.lock()
+        defer { enumerationLock.unlock() }
         guard let device = host.resolveDevice(udid: udid) else {
             throw SimulatorError.notFound(udid: udid)
         }

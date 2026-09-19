@@ -43,6 +43,10 @@ protocol Simulator: Sendable {
     /// Display planes for this simulator (phone + CarPlay aggregates).
     func displays() -> any Displays
 
+    /// The device's hinge — meaningful on a foldable, where its angle
+    /// decides which panel the phone plane binds. Read-only today.
+    func hinge() -> any Hinge
+
     /// Host external-display panel (CarPlay enablement).
     func externalDisplays() -> any ExternalDisplays
 
@@ -180,7 +184,31 @@ extension Simulator {
     /// Returns `nil` for devices without a matching DeviceKit chrome
     /// (e.g. Apple TV).
     func chrome(in chromes: any Chromes) -> DeviceChromeAssets? {
-        chromes.assets(forDeviceName: deviceTypeName)
+        chrome(in: chromes, panel: litPanel(in: chromes))
+    }
+
+    /// One named panel's chrome, hinge not consulted. Image routes take
+    /// the panel from the URL the definition handed out, so a cached
+    /// `bezel.png` can never be the other panel's.
+    func chrome(in chromes: any Chromes, panel: IntegratedPanel) -> DeviceChromeAssets? {
+        switch panel {
+        case .primary:   return chromes.assets(forDeviceName: deviceTypeName)
+        case .secondary: return chromes.assets(forDeviceName: deviceTypeName, panel: .secondary)
+        }
+    }
+
+    /// Which of this device's panels the chrome, screen and tap space
+    /// describe right now.
+    ///
+    /// One panel is the only answer on every device but a foldable,
+    /// and it is answered from the profile alone. A foldable asks its
+    /// hinge — a devicectl round-trip — and takes no reading as folded,
+    /// which is how the device boots.
+    func litPanel(in chromes: any Chromes) -> IntegratedPanel {
+        guard chromes.panels(forDeviceName: deviceTypeName).contains(.secondary) else {
+            return .primary
+        }
+        return hinge().angle()?.litPanel ?? .primary
     }
 
     /// Resolve the installed 3D model for this simulator. Device type

@@ -25,6 +25,18 @@ protocol Chromes: AnyObject, Sendable {
     /// load. The caller decides whether to fall back to a plain
     /// stream.
     func assets(forDeviceName deviceName: String) -> DeviceChromeAssets?
+
+    /// The chrome for one of the device's own panels. The primary is
+    /// what `assets(forDeviceName:)` returns; the secondary exists only
+    /// on a foldable — iPhone Duo's unfolded panel has its own DeviceKit
+    /// chrome (`phone14`) and its own screen size — and is `nil` on
+    /// every other device.
+    func assets(forDeviceName deviceName: String, panel: IntegratedPanel) -> DeviceChromeAssets?
+
+    /// Which panels the device has: `[.primary]` for everything but a
+    /// foldable, `[.primary, .secondary]` for one, empty when no chrome
+    /// bundle covers the device at all.
+    func panels(forDeviceName deviceName: String) -> [IntegratedPanel]
 }
 
 /// What `Chromes` hands back: the parsed layout from `chrome.json`
@@ -58,13 +70,22 @@ struct DeviceChromeAssets: Sendable, Equatable {
     /// in chrome pixels. All zero when no buttons (or buttons fit
     /// inside the device body).
     let buttonMargins: Insets
+    /// The panel's framebuffer mask, rasterized — the shape the
+    /// simulator clips this screen to (see
+    /// `DeviceProfile.PanelProfile.framebufferMaskIdentifier`). Served
+    /// so the page clips the live frame to the same shape rather than
+    /// to `chrome.json`'s one corner radius. `nil` when the profile
+    /// names none or the file is unreadable; the bezel does not depend
+    /// on it.
+    let screenMask: ChromeImage?
 
     init(
         chrome: DeviceChrome,
         composite: ChromeImage,
         bareComposite: ChromeImage? = nil,
         buttonImages: [String: ChromeImage] = [:],
-        buttonMargins: Insets = Insets(top: 0, left: 0, bottom: 0, right: 0)
+        buttonMargins: Insets = Insets(top: 0, left: 0, bottom: 0, right: 0),
+        screenMask: ChromeImage? = nil
     ) {
         self.chrome = chrome
         self.composite = composite
@@ -75,6 +96,15 @@ struct DeviceChromeAssets: Sendable, Equatable {
         self.bareComposite = bareComposite ?? composite
         self.buttonImages = buttonImages
         self.buttonMargins = buttonMargins
+        self.screenMask = screenMask
+    }
+
+    /// The same assets with the panel's mask attached.
+    func withScreenMask(_ mask: ChromeImage?) -> DeviceChromeAssets {
+        DeviceChromeAssets(
+            chrome: chrome, composite: composite, bareComposite: bareComposite,
+            buttonImages: buttonImages, buttonMargins: buttonMargins, screenMask: mask
+        )
     }
 
     /// Layout JSON for the `/simulators/<udid>/chrome.json` endpoint.

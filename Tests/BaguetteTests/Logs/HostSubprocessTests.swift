@@ -56,6 +56,80 @@ struct HostSubprocessTests {
         #expect(run.output.contains("to-stderr"))
     }
 
+    // MARK: - end of output
+
+    /// `FileHandle.readabilityHandler` keeps firing with empty data once
+    /// the pipe reaches end-of-file until it is cleared — a busy loop.
+    /// A child that exits on its own (every one-shot `simctl`, a
+    /// `devicectl` monitor whose timeout lands) must not leave one
+    /// behind: `serve` was found pinned at 100% by two of these.
+    @Test func `a child that exits on its own stops being read`() async throws {
+        let sub = HostSubprocess()
+        let finished = Finished()
+        try sub.run(
+            executable: URL(fileURLWithPath: "/bin/echo"), arguments: ["bye"],
+            onBytes: { _ in }, onExit: { finished.complete($0) }
+        )
+        _ = try await finished.value(timeout: Self.childDeadline)
+        // The reader is released shortly after EOF; give the source a
+        // moment to deliver it.
+        for _ in 0..<50 where sub.isReading { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!sub.isReading, "the pipe is still being read after the child exited")
+    }
+
+    // MARK: - descriptors
+
+    /// `Process` closes the parent's copy of the stdout pipe's write end
+    /// as soon as the child is spawned — it is the child's descriptor
+    /// now — and the kernel hands that number to the next thing that
+    /// asks. A terminate that then closes "our" write end closes that
+    /// stranger instead: `xcode-select -p`'s pipe died of
+    /// `readDataOfLength: Bad file descriptor` in `serve` once a
+    /// long-lived hinge watch put terminates next to other spawns.
+    @Test func `terminating leaves a descriptor Process already gave back alone`() async throws {
+        let sub = HostSubprocess()
+        try sub.run(
+            executable: URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"],
+            onBytes: { _ in }, onExit: { _ in }
+        )
+        // Give Foundation the moment it needs to release the write end,
+        // then take whatever descriptor comes next: with the bug, that
+        // is the number `terminate()` is about to close.
+        try await Task.sleep(for: .milliseconds(200))
+        let bystander = Pipe()
+        let fd = bystander.fileHandleForReading.fileDescriptor
+
+        sub.terminate()
+
+        #expect(fcntl(fd, F_GETFD) != -1, "terminate closed a descriptor it did not own")
+        try? bystander.fileHandleForReading.close()
+        try? bystander.fileHandleForWriting.close()
+    }
+
+    /// The same, one step later: `terminate()` closed the read end, so
+    /// its number is free and the next pipe takes it. When the
+    /// `HostSubprocess` is then released, its `deinit` must not close
+    /// that end a second time — that is the stranger's descriptor now.
+    @Test func `releasing a terminated subprocess does not close its old descriptor again`() async throws {
+        var sub: HostSubprocess? = HostSubprocess()
+        try sub!.run(
+            executable: URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"],
+            onBytes: { _ in }, onExit: { _ in }
+        )
+        try await Task.sleep(for: .milliseconds(200))
+        sub!.terminate()
+        let bystander = Pipe()
+        let fds = [bystander.fileHandleForReading.fileDescriptor, bystander.fileHandleForWriting.fileDescriptor]
+
+        sub = nil
+
+        for fd in fds {
+            #expect(fcntl(fd, F_GETFD) != -1, "deinit closed descriptor \(fd), which it no longer owned")
+        }
+        try? bystander.fileHandleForReading.close()
+        try? bystander.fileHandleForWriting.close()
+    }
+
     // MARK: - stdin
 
     @Test func `a stdin payload is delivered to the child`() async throws {
