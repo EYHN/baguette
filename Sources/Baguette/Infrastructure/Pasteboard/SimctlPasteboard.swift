@@ -1,6 +1,15 @@
 import Foundation
 
-/// `Pasteboard` backed by `xcrun simctl pbcopy | pbpaste | pbsync`.
+/// `Pasteboard` backed by `xcrun simctl pbcopy | pbpaste | pbsync`,
+/// with `xcrun devicectl device pasteboard copy` asked first for writes.
+///
+/// Under Xcode 27 `simctl pbcopy` exits 0 and writes nothing (measured
+/// on iOS 26.5, 27.0 and 27.1 guests), while Core Device's copy lands
+/// and `simctl pbpaste` reads it back. So `setText` tries devicectl
+/// first and falls back to `pbcopy` when it exits non-zero — an Xcode
+/// without the subcommand (usage error, 64), or one that does not know
+/// the device. No version check: an Xcode 26 host keeps the route that
+/// works there.
 ///
 /// The orchestration here is pure: argv assembly + the `Subprocess`
 /// exit handshake, with the paste text riding the child's stdin
@@ -25,20 +34,26 @@ final class SimctlPasteboard: Pasteboard, @unchecked Sendable {
     }
 
     func setText(_ text: String) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        let payload = Data(text.utf8)
+        if try await write(["devicectl", "device", "pasteboard", "copy", "--device", udid], stdin: payload) == 0 {
+            return
+        }
+        let status = try await write(["simctl", "pbcopy", udid], stdin: payload)
+        guard status == 0 else { throw PasteboardError.simctlFailed(status: status) }
+    }
+
+    /// Run `xcrun` with `stdin` as the child's input; resolve with the
+    /// exit status. Only a failed spawn throws — a non-zero exit is the
+    /// caller's to interpret, since one route's failure picks the next.
+    private func write(_ arguments: [String], stdin: Data) async throws -> Int32 {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int32, Error>) in
             do {
                 try subprocess.run(
                     executable: xcrun,
-                    arguments: ["simctl", "pbcopy", udid],
-                    stdin: Data(text.utf8),
+                    arguments: arguments,
+                    stdin: stdin,
                     onBytes: { _ in },
-                    onExit: { code in
-                        if code == 0 {
-                            continuation.resume()
-                        } else {
-                            continuation.resume(throwing: PasteboardError.simctlFailed(status: code))
-                        }
-                    }
+                    onExit: { code in continuation.resume(returning: code) }
                 )
             } catch {
                 continuation.resume(throwing: error)
