@@ -2,20 +2,14 @@ name: Xcode 27 compatibility
 
 # Xcode 27 relocated SimulatorKit.framework (issue #28). The `xcode-27`
 # runner image is the only place we can prove the fix: it ships Xcode 27
-# beta 3 and *no* Xcode 26, so `CoreSimulators.developerDir()` has
-# nothing to silently fall back to. On a developer machine with both
-# Xcodes installed, the fallback masks the bug — baguette works via 26
-# whether or not the fix is present, so a green local run proves nothing.
+# and *no* Xcode 26, so `CoreSimulators.developerDir()` has nothing to
+# silently fall back to. On a developer machine with both Xcodes
+# installed, the fallback masks the bug — baguette works via 26 whether
+# or not the fix is present, so a green local run proves nothing.
 #
-# Two triggers, for two different ways this can break:
-#
-#   - push / pull_request — our own changes regressing Xcode 27 support.
-#   - schedule — Apple moving things again in a later beta. That breaks
-#     with no commit of ours involved, so nothing else would catch it;
-#     a weekly run turns a silent break into a dated red build.
-#
-# The image is a public preview and can queue, so the scheduled run is
-# weekly rather than nightly.
+# `ci.yml` can't cover this: the macos-26 image carries no Xcode 27, and
+# `xcode-27` is the only image that does. Once GitHub ships Xcode 27 on
+# a non-preview image, fold these checks into `ci.yml` and delete this.
 
 on:
   workflow_dispatch:
@@ -23,8 +17,6 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: "0 6 * * 1"
 
 jobs:
   xcode-27:
@@ -44,7 +36,7 @@ jobs:
       # The whole fix rests on a relocation reported by third parties.
       # Assert it directly rather than trusting the report: this step is
       # the primary evidence, and it fails loudly if Apple moves the
-      # framework again in a later beta.
+      # framework again.
       - name: Assert SimulatorKit's location on Xcode 27
         run: |
           DEV="$(xcode-select -p)"
