@@ -1,6 +1,7 @@
 import Foundation
 import ObjectiveC
 import CoreGraphics
+import Darwin
 
 /// Production `Accessibility` — backed by `AXPTranslator` from the
 /// private `AccessibilityPlatformTranslation` framework.
@@ -163,7 +164,19 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
         // moves; every other device's is its one screen.
         let pointSize = litPanelPointSize() ?? Self.devicePointSize(for: device)
         let rootFrame = AXElementReader.frame(of: frontmostRoot)
-        let transform = AXFrameTransform(rootFrame: rootFrame, pointSize: pointSize)
+        guard rootFrame.width > 0, rootFrame.height > 0,
+              rootFrame.width.isFinite, rootFrame.height.isFinite else { return nil }
+        // A landscape UI reports a landscape root. Its frames are read in
+        // the upright UI's space and turned back onto the portrait panel;
+        // without an authoritative direction that turn is a guess between
+        // left and right, so a landscape root with none is no geometry.
+        let orientation = Self.screenOrientation(device)
+        guard orientation != nil || rootFrame.width <= rootFrame.height else {
+            log("[ax] landscape root \(rootFrame) with no readable orientation")
+            return nil
+        }
+        let transform = AXFrameTransform.presenting(
+            rootFrame: rootFrame, pointSize: pointSize, orientation: orientation ?? .portrait)
 
         return try body(AXPContext(
             translator: translator,
@@ -452,9 +465,47 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
 
     /// Resolve the simulator's logical-point size from its
     /// `deviceType.mainScreenSize` (pixels) / `mainScreenScale`.
+    /// The UI orientation SimulatorKit reports for the device's own
+    /// framebuffer port, or nil when none is readable (mid-rotation, an
+    /// external-only descriptor). Reads the descriptor path capture uses
+    /// rather than constructing Simulator.app's `SimDeviceScreen`, which
+    /// wants the main queue and can trap from a worker thread.
+    private static func screenOrientation(_ device: NSObject) -> ScreenOrientation? {
+        guard let io = AXElementReader.object(device, "io") as? NSObject else { return nil }
+        func read() -> ScreenOrientation? {
+            guard let ports = AXElementReader.object(io, "deviceIOPorts") as? [NSObject] else { return nil }
+            for port in ports {
+                guard let identifier = AXElementReader.object(port, "portIdentifier"),
+                      "\(identifier)" == "com.apple.framebuffer.display",
+                      let descriptor = AXElementReader.object(port, "descriptor") as? NSObject,
+                      let properties = AXElementReader.object(descriptor, "screenProperties") as? NSObject,
+                      let raw = invokeUInt32Getter(properties, NSSelectorFromString("uiOrientation")),
+                      let orientation = ScreenOrientation(rawValue: raw) else { continue }
+                return orientation
+            }
+            return nil
+        }
+        if let orientation = read() { return orientation }
+        // A framebuffer port with no orientation is a rotation in flight,
+        // not a missing port: leave live IO ports alone so an active
+        // capture pipeline is not disrupted.
+        if let ports = AXElementReader.object(io, "deviceIOPorts") as? [NSObject],
+           ports.contains(where: {
+               guard let identifier = AXElementReader.object($0, "portIdentifier") else { return false }
+               return "\(identifier)" == "com.apple.framebuffer.display"
+           }) { return nil }
+        let update = NSSelectorFromString("updateIOPorts")
+        if io.responds(to: update) { io.perform(update) }
+        return read()
+    }
+
     /// Falls back to a sensible iPhone-15-Pro size when the
     /// runtime doesn't expose the values (unlikely on iOS 26).
     /// Internal so unit tests can drive it against a fake device.
+    ///
+    /// iPhone and iPad device types report `mainScreenSize` in the
+    /// panel's native portrait shape, but a type may hand it back
+    /// landscape-first; the AX space is always the portrait panel.
     static func devicePointSize(for device: NSObject) -> CGSize {
         let fallback = CGSize(width: 393, height: 852)
         guard let deviceType = device.value(forKey: "deviceType") as? NSObject else {
@@ -470,9 +521,11 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
         }
         let scale = (deviceType.value(forKey: "mainScreenScale") as? NSNumber)?.doubleValue ?? 3.0
         guard scale > 0 else { return fallback }
+        let typeID = AXElementReader.string(deviceType, "identifier") ?? ""
+        let portraitNative = typeID.contains("iPhone") || typeID.contains("iPad")
         return CGSize(
-            width: pixelSize.width / scale,
-            height: pixelSize.height / scale
+            width: (portraitNative ? min(pixelSize.width, pixelSize.height) : pixelSize.width) / scale,
+            height: (portraitNative ? max(pixelSize.width, pixelSize.height) : pixelSize.height) / scale
         )
     }
 }
@@ -598,4 +651,18 @@ final class TokenDispatcher: NSObject, @unchecked Sendable {
         }
         return NSNull()
     }
+}
+
+private typealias UInt32Getter = @convention(c) (AnyObject, Selector) -> UInt32
+
+private let sendUInt32Message: UInt32Getter = {
+    let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "objc_msgSend")!
+    return unsafeBitCast(symbol, to: UInt32Getter.self)
+}()
+
+/// Call a zero-argument selector returning a C `unsigned int` — KVC boxes
+/// it, but `perform` cannot return a scalar without a cast like this.
+private func invokeUInt32Getter(_ target: NSObject, _ selector: Selector) -> UInt32? {
+    guard target.responds(to: selector) else { return nil }
+    return sendUInt32Message(target, selector)
 }

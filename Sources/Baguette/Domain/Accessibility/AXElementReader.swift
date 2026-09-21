@@ -17,6 +17,15 @@ import CoreGraphics
 /// `FakeAXTreeElement` `NSObject` subclasses that override the
 /// same selectors / KVC keys the production element responds to.
 enum AXElementReader {
+    /// The object a zero-argument selector returns, or `nil` when the
+    /// receiver does not respond. Unlike KVC this never raises for an
+    /// unknown key, so it is safe against CoreSimulator objects whose
+    /// properties vary by Xcode.
+    static func object(_ obj: NSObject, _ key: String) -> Any? {
+        let selector = NSSelectorFromString(key)
+        guard obj.responds(to: selector) else { return nil }
+        return obj.perform(selector)?.takeUnretainedValue()
+    }
 
     /// Non-empty string-valued property; returns `nil` for
     /// missing keys, non-string values, or empty strings.

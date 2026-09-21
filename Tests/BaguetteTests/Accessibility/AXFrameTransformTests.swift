@@ -150,4 +150,82 @@ struct AXFrameTransformTests {
         )
         #expect(zeroPoint.unmap(CGPoint(x: 5, y: 6)) == CGPoint(x: 5, y: 6))
     }
+
+    // MARK: - landscape: the UI reports its root sideways to the panel
+
+    /// Measured on iPhone 17 (402×874 pt) running Safari landscape: AXP
+    /// reports the root as (0, 0, 874, 402) and SimulatorKit's
+    /// `uiOrientation` as 3. The portrait-only transform scaled by
+    /// 402/874 and centred vertically, describing the whole UI as a
+    /// 402×185 band at y≈344; every element frame was off and taps
+    /// through `unmap` landed on nothing.
+    @Test func `landscape root fills the portrait panel instead of a letterboxed band`() {
+        let t = AXFrameTransform.presenting(
+            rootFrame: CGRect(x: 0, y: 0, width: 874, height: 402),
+            pointSize: CGSize(width: 402, height: 874),
+            orientation: .landscapeRight
+        )
+        let root = t.map(CGRect(x: 0, y: 0, width: 874, height: 402))
+        #expect(root == CGRect(x: 0, y: 0, width: 402, height: 874))
+    }
+
+    /// The "Customize Start Page" button: AXP frame centred at
+    /// (524, 242) in the upright 874×402 UI; on screen its centre is at
+    /// (242, 350) of the portrait framebuffer (the UI's top edge runs
+    /// along the panel's left edge).
+    @Test func `landscape-right turns the upright UI onto the panel with its top on the left`() {
+        let t = AXFrameTransform.presenting(
+            rootFrame: CGRect(x: 0, y: 0, width: 874, height: 402),
+            pointSize: CGSize(width: 402, height: 874),
+            orientation: .landscapeRight
+        )
+        let mapped = t.map(CGRect(x: 504, y: 222, width: 40, height: 40))
+        #expect(abs(mapped.midX - 242) < 0.001)
+        #expect(abs(mapped.midY - 350) < 0.001)
+        #expect(mapped.size == CGSize(width: 40, height: 40))
+        // And back: the point a tap lands on resolves to the same element.
+        let back = t.unmap(CGPoint(x: 242, y: 350))
+        #expect(abs(back.x - 524) < 0.001)
+        #expect(abs(back.y - 242) < 0.001)
+    }
+
+    @Test func `landscape-left is the mirror turn`() {
+        let t = AXFrameTransform.presenting(
+            rootFrame: CGRect(x: 0, y: 0, width: 874, height: 402),
+            pointSize: CGSize(width: 402, height: 874),
+            orientation: .landscapeLeft
+        )
+        // Upright top-left corner lands at the panel's top-right.
+        let corner = t.map(CGRect(x: 0, y: 0, width: 10, height: 10))
+        #expect(abs(corner.maxX - 402) < 0.001)
+        #expect(abs(corner.minY - 0) < 0.001)
+        let back = t.unmap(CGPoint(x: 397, y: 5))
+        #expect(abs(back.x - 5) < 0.001)
+        #expect(abs(back.y - 5) < 0.001)
+    }
+
+    /// A panel mounted sideways (iPhone Duo's inner display) reports
+    /// the elements upright but the root as the panel's own portrait
+    /// rectangle; that root is restated so the elements scale on the
+    /// right axis, and the root itself maps to the whole panel.
+    @Test func `a portrait-shaped root under a landscape UI is restated as the upright frame`() {
+        let t = AXFrameTransform.presenting(
+            rootFrame: CGRect(x: 0, y: 0, width: 402, height: 874),
+            pointSize: CGSize(width: 402, height: 874),
+            orientation: .landscapeRight
+        )
+        #expect(t.rootFrame == CGRect(x: 0, y: 0, width: 874, height: 402))
+        #expect(t.map(CGRect(x: 0, y: 0, width: 402, height: 874)) == CGRect(x: 0, y: 0, width: 402, height: 874))
+    }
+
+    @Test func `portrait keeps the letterbox mapping unchanged`() {
+        let t = AXFrameTransform.presenting(
+            rootFrame: CGRect(x: 0, y: 0, width: 100, height: 100),
+            pointSize: CGSize(width: 100, height: 200),
+            orientation: .portrait
+        )
+        #expect(t == AXFrameTransform(rootFrame: CGRect(x: 0, y: 0, width: 100, height: 100),
+                                      pointSize: CGSize(width: 100, height: 200)))
+        #expect(t.map(CGRect(x: 10, y: 20, width: 30, height: 40)) == CGRect(x: 10, y: 70, width: 30, height: 40))
+    }
 }
