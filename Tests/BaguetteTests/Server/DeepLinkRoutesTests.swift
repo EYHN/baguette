@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Handler-level coverage for the console's two routes. We drive the
 /// pure dispatch helpers rather than the Hummingbird `Response`

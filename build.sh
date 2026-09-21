@@ -3,7 +3,7 @@ set -e
 cd "$(dirname "$0")"
 
 # Every iOS-Simulator dylib baguette injects, built and staged into
-# Sources/Baguette/Resources/<Name>/ for SPM to `.copy` as a resource.
+# Sources/BaguetteCore/Resources/<Name>/ for SPM to `.copy` as a resource.
 # Cross-compiled against the iphonesimulator SDK (fat: arm64 + x86_64),
 # linker-signed adhoc. All of them are armed through one shared
 # DYLD_INSERT_LIBRARIES (see `InjectedDylibs`), and the loop inside picks up

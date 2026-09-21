@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("VerifiedDeviceAssets")
 struct VerifiedDeviceAssetsTests {
@@ -129,10 +129,41 @@ extension VerifiedDeviceAssetsTests {
         let assets = VerifiedDeviceAssets(
             cacheRoot: scratch.appending(path: "cache"),
             fetch: { _ in Data() },
-            developerDir: { contents.appending(path: "Developer").path }
+            developerDir: { contents.appending(path: "Developer").path },
+            installedXcodes: { [] }
         )
 
         #expect(try assets.resolve(Self.model(directory: scratch, xcodeResource: resource)) == asset)
+    }
+
+    /// iPhone Duo's model arrived with Xcode 27.1 while the simulator
+    /// runs fine under 27.0: the selected Xcode has no `V68.usdz`. Any
+    /// other install that does is used; the selected one still wins
+    /// when it has the file.
+    @Test func `an Xcode asset the selected Xcode lacks is found in another install`() throws {
+        let scratch = try Self.makeScratch()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let resource = "SharedFrameworks/DeviceKit.framework/Resources/V68.usdz"
+        let selected = scratch.appending(path: "Xcode.app/Contents")
+        let beta = scratch.appending(path: "Xcode 27.1 beta.app/Contents")
+        let asset = beta.appending(path: resource)
+        try FileManager.default.createDirectory(
+            at: asset.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("USDZ".utf8).write(to: asset)
+        let assets = VerifiedDeviceAssets(
+            cacheRoot: scratch.appending(path: "cache"),
+            fetch: { _ in Data() },
+            developerDir: { selected.appending(path: "Developer").path },
+            installedXcodes: { [selected, beta] }
+        )
+
+        #expect(try assets.resolve(Self.model(directory: scratch, xcodeResource: resource)) == asset)
+
+        let own = selected.appending(path: resource)
+        try FileManager.default.createDirectory(
+            at: own.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("USDZ".utf8).write(to: own)
+        #expect(try assets.resolve(Self.model(directory: scratch, xcodeResource: resource)) == own)
     }
 
     @Test func `a missing Xcode asset names the resource it looked for`() throws {
@@ -141,7 +172,8 @@ extension VerifiedDeviceAssetsTests {
         let assets = VerifiedDeviceAssets(
             cacheRoot: scratch.appending(path: "cache"),
             fetch: { _ in Data() },
-            developerDir: { scratch.appending(path: "Xcode.app/Contents/Developer").path }
+            developerDir: { scratch.appending(path: "Xcode.app/Contents/Developer").path },
+            installedXcodes: { [scratch.appending(path: "Xcode-beta.app/Contents")] }
         )
 
         #expect(throws: DeviceModelError.localAssetNotFound("Plugins/V68.usdz")) {

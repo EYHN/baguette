@@ -1,7 +1,7 @@
 import IOSurface
 import Metal
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("MetalRenderTargetRing")
 struct MetalRenderTargetRingTests {

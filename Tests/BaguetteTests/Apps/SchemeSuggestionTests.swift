@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Pure-value coverage for `SchemeSuggestion` — the completion behind
 /// the console's URL bar: type a few characters, get the schemes that

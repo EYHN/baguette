@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `DevicectlHinge` reads one sample from `xcrun devicectl device motion
 /// hinge-angle` and stops. The monitor is a stream that runs until its
@@ -166,5 +166,30 @@ struct DevicectlHingeTests {
         captures.onExit?(1)
         #expect(seen.count == 0)
         watch.cancel()
+    }
+
+    /// The monitor is a child that can be killed or run out its timeout;
+    /// its watcher hears that it is gone, so it can start another.
+    @Test func `a monitor that exits on its own ends the watch, once`() {
+        final class Ends: @unchecked Sendable { var count = 0 }
+        let ends = Ends()
+        let (hinge, _, captures) = makeHinge { _ in }
+        let watch = hinge.watch(onAngle: { _ in }, onEnd: { ends.count += 1 })
+        captures.onBytes?(Data(sample.utf8))
+        captures.onExit?(137)
+        #expect(ends.count == 1)
+        // Cancelling what has already ended is quiet, and vice versa.
+        watch.cancel()
+        #expect(ends.count == 1)
+    }
+
+    @Test func `a watch that was cancelled does not report its own end`() {
+        final class Ends: @unchecked Sendable { var count = 0 }
+        let ends = Ends()
+        let (hinge, _, captures) = makeHinge { _ in }
+        let watch = hinge.watch(onAngle: { _ in }, onEnd: { ends.count += 1 })
+        watch.cancel()
+        captures.onExit?(15)
+        #expect(ends.count == 0)
     }
 }

@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Handler-level coverage for the plugin routes, matching the
 /// house style: the pure parse + dispatch helpers are tested, not the

@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// An input surface dispatches touches to an injectable Indigo HID
 /// target. Phone defaults to `IndigoHIDTouchTarget.phone` (`0x32`);
@@ -9,17 +9,23 @@ import Mockable
 @Suite("IndigoHIDTouchTarget")
 struct IndigoHIDTouchTargetTests {
 
-    @Test func `IndigoHIDInput defaults touch target to phone digitizer`() {
+    /// `touchTarget` follows a foldable's lit panel, so it asks the host
+    /// for the device; a host that knows none leaves the fixed target.
+    private func ghostHost() -> MockDeviceHost {
         let host = MockDeviceHost()
-        let input = IndigoHIDInput(udid: "ghost", host: host)
+        given(host).resolveDevice(udid: .any).willReturn(nil)
+        return host
+    }
+
+    @Test func `IndigoHIDInput defaults touch target to phone digitizer`() {
+        let input = IndigoHIDInput(udid: "ghost", host: ghostHost())
         #expect(input.touchTarget == IndigoHIDTouchTarget.phone)
         #expect(input.touchTarget == 0x32)
     }
 
     @Test func `IndigoHIDInput retains a custom touch target`() {
-        let host = MockDeviceHost()
         let carPlay: UInt32 = 0x4000_0065
-        let input = IndigoHIDInput(udid: "ghost", host: host, touchTarget: carPlay)
+        let input = IndigoHIDInput(udid: "ghost", host: ghostHost(), touchTarget: carPlay)
         #expect(input.touchTarget == carPlay)
     }
 

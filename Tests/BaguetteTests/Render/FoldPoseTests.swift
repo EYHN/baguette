@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 // The hinge angle poses the book. The shutting clip runs from flat (its
 // start) to shut (the definition's shut time); it raises the left half

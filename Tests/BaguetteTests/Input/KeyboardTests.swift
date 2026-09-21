@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("KeyboardKey")
 struct KeyboardKeyTests {
@@ -193,11 +193,13 @@ struct TypeTextGestureTests {
         let keyA = KeyboardKey.from(wireCode: "KeyA")!
         _ = TypeText(text: "Aa").execute(on: input)
 
+        // Text is a stream: each key gets a 5 ms hold, not the 100 ms a
+        // single `key` gesture defaults to.
         verify(input).key(
-            .value(keyA), modifiers: .value([.shift]), duration: .value(0)
+            .value(keyA), modifiers: .value([.shift]), duration: .value(TypeText.hold)
         ).called(1)
         verify(input).key(
-            .value(keyA), modifiers: .value([]), duration: .value(0)
+            .value(keyA), modifiers: .value([]), duration: .value(TypeText.hold)
         ).called(1)
     }
 

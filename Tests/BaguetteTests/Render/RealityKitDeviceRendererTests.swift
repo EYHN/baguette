@@ -3,7 +3,7 @@ import Foundation
 import ImageIO
 import Testing
 
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("RealityKitDeviceRenderer")
 struct RealityKitDeviceRendererTests {

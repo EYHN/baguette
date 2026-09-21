@@ -5,7 +5,7 @@ import CoreVideo
 import ImageIO
 import IOSurface
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// The SimulatorKit call that hands over a framebuffer is integration-
 /// only, but everything `ScreenSnapshot` does around it is not: the
@@ -19,7 +19,7 @@ struct ScreenSnapshotTests {
     @Test func `a captured frame comes back as JPEG at the screen's own size`() async throws {
         let surface = try #require(makeSurface(width: 120, height: 60))
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in onFrame(surface) }
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in onFrame(surface) }
         given(screen).stop().willReturn(())
 
         let bytes = try await ScreenSnapshot.capture(screen: screen)
@@ -31,7 +31,7 @@ struct ScreenSnapshotTests {
     @Test func `a requested size resizes the captured frame`() async throws {
         let surface = try #require(makeSurface(width: 120, height: 60))
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in onFrame(surface) }
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in onFrame(surface) }
         given(screen).stop().willReturn(())
 
         let bytes = try await ScreenSnapshot.capture(
@@ -45,7 +45,7 @@ struct ScreenSnapshotTests {
     @Test func `a PNG capture carries the PNG signature`() async throws {
         let surface = try #require(makeSurface(width: 40, height: 20))
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in onFrame(surface) }
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in onFrame(surface) }
         given(screen).stop().willReturn(())
 
         let bytes = try await ScreenSnapshot.capture(screen: screen, format: .png)
@@ -55,7 +55,7 @@ struct ScreenSnapshotTests {
 
     @Test func `a screen that never delivers a frame times out`() async throws {
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willReturn(())
+        given(screen).start(onFrame: .any, onMetadata: .any).willReturn(())
         given(screen).stop().willReturn(())
 
         await #expect(throws: ScreenSnapshot.Failure.timeout) {
@@ -65,7 +65,7 @@ struct ScreenSnapshotTests {
 
     @Test func `a screen that refuses to open surfaces its own error`() async throws {
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willThrow(SnapshotTestError.notBooted)
+        given(screen).start(onFrame: .any, onMetadata: .any).willThrow(SnapshotTestError.notBooted)
         given(screen).stop().willReturn(())
 
         await #expect(throws: SnapshotTestError.notBooted) {
