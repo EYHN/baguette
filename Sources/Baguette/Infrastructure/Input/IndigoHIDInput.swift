@@ -59,6 +59,10 @@ final class IndigoHIDInput: Input, @unchecked Sendable {
     // assume. target=0x32 (the same digitizer constant the mouse path
     // uses); operation 1=down, 2=up. No timestamp.
     private typealias HIDArbitraryFn = @convention(c) (UInt32, UInt32, UInt32, UInt32) -> UnsafeMutableRawPointer?
+    /// `IndigoHIDMessageForKeyboardArbitrary(usage, direction)` — the
+    /// legacy keyboard service's own message. Used for page-7 keys on
+    /// iOS 27+ where the touch-target sender is dropped (see `KeyRoute`).
+    private typealias KeyboardFn = @convention(c) (UInt32, UInt32) -> UnsafeMutableRawPointer?
     private typealias ScrollFn = @convention(c) (UInt32, Double, Double, Double) -> UnsafeMutableRawPointer?
     private typealias ServiceFn = @convention(c) () -> UnsafeMutableRawPointer?
     /// `IndigoHIDMessageToCreateCarPlayService` — unlike its pointer and
@@ -82,6 +86,7 @@ final class IndigoHIDInput: Input, @unchecked Sendable {
     private var mouseEdgeFn: MouseEdgeFn?
     private var buttonFn: ButtonFn?
     private var hidArbFn: HIDArbitraryFn?
+    private var keyboardFn: KeyboardFn?
     private var scrollFn: ScrollFn?
     private var createPointerSvc: ServiceFn?
     private var createMouseSvc: ServiceFn?
@@ -120,6 +125,9 @@ final class IndigoHIDInput: Input, @unchecked Sendable {
     private func resolveDevice() -> NSObject? {
         host.resolveDevice(udid: udid)
     }
+
+    /// Cached once: a simulator never changes runtime mid-session.
+    private lazy var runtimeMajor: Int? = KeyRoute.runtimeMajor(of: resolveDevice())
 
     deinit {
         guard warmed, let client else { return }
@@ -309,9 +317,17 @@ final class IndigoHIDInput: Input, @unchecked Sendable {
     }
 
     func key(_ key: KeyboardKey, modifiers: Set<KeyModifier>, duration: Double) -> Bool {
-        guard let c = ensureWarm(), let kfn = hidArbFn else {
+        guard let c = ensureWarm(), let arbitrary = hidArbFn else {
             log("[hid] key — IndigoHIDMessageForHIDArbitrary unresolved")
             return false
+        }
+        // Page-7 usages go through the keyboard service where `KeyRoute`
+        // says the touch target would swallow them.
+        let keyboard = KeyRoute.choose(runtimeMajor: runtimeMajor) == .keyboardService
+            ? keyboardFn : nil
+        let kfn: (UInt32, UInt32, UInt32, UInt32) -> UnsafeMutableRawPointer? = { target, page, usage, op in
+            if let keyboard, page == 7 { return keyboard(usage, op) }
+            return arbitrary(target, page, usage, op)
         }
         let holdUs = holdMicroseconds(for: duration)
         let target = touchTarget
@@ -677,6 +693,7 @@ final class IndigoHIDInput: Input, @unchecked Sendable {
         mouseEdgeFn = mouseSym.map { unsafeBitCast($0, to: MouseEdgeFn.self) }
         buttonFn   = dlsym(handle, "IndigoHIDMessageForButton").map { unsafeBitCast($0, to: ButtonFn.self) }
         hidArbFn   = dlsym(handle, "IndigoHIDMessageForHIDArbitrary").map { unsafeBitCast($0, to: HIDArbitraryFn.self) }
+        keyboardFn = dlsym(handle, "IndigoHIDMessageForKeyboardArbitrary").map { unsafeBitCast($0, to: KeyboardFn.self) }
         scrollFn   = dlsym(handle, "IndigoHIDMessageForScrollEvent").map { unsafeBitCast($0, to: ScrollFn.self) }
         createPointerSvc = dlsym(handle, "IndigoHIDMessageToCreatePointerService").map { unsafeBitCast($0, to: ServiceFn.self) }
         createMouseSvc   = dlsym(handle, "IndigoHIDMessageToCreateMouseService").map { unsafeBitCast($0, to: ServiceFn.self) }
