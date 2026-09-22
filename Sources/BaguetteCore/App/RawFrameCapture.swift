@@ -31,8 +31,181 @@ public final class RawFrameCapture: @unchecked Sendable {
         /// `DisplayCanvas` of all its panels, and this JSON says where each
         /// one is, which one the device is presenting on, and how each is
         /// turned; `uiOrientationRaw` is the presenting panel's.
+        ///
+        /// A capture started with `start(scene:)` delivers something else
+        /// here: the scene placement, `{"type":"scene",...}` (see
+        /// `SceneOptions`), restated whenever the camera, the hinge or the
+        /// lit panel moves.
         public let layoutJSON: String?
     }
+
+    /// The device drawn on its 3D model instead of its flat screen — the
+    /// stage `screenshot3D` paints with, kept standing and repainted with
+    /// every frame the simulator draws. The frame is `width` × `height`
+    /// BGRA composed to I420 like any other; there is no alpha on the
+    /// wire, so a `transparent` background composes over black.
+    ///
+    /// `layoutJSON` then carries the placement a viewer needs to map a
+    /// pointer back onto the screen and to know the pose:
+    ///
+    /// ```json
+    /// {"type":"scene","canvas":{"width":1024,"height":1024},
+    ///  "pieces":[{"corners":[[u,v],[u,v],[u,v],[u,v]],"u":[0,0.5],"v":[0,1]}],
+    ///  "screen":{"screenId":3,"pointWidth":669,"pointHeight":951},
+    ///  "buttons":[{"id":"power","at":[u,v],"control":[u,v]}],
+    ///  "camera":{"rotation":{"x":-8,"y":18,"z":0},"zoom":1},
+    ///  "litPanel":"secondary","hinge":{"degrees":130}}
+    /// ```
+    ///
+    /// `pieces` are the lit screen's flat pieces in the frame (normalized,
+    /// corners in the framebuffer's order — top-left, top-right,
+    /// bottom-right, bottom-left) and the part of the framebuffer each
+    /// shows, so a point inside a piece maps straight to framebuffer
+    /// space, where touches land; `screen` is that framebuffer's panel and
+    /// point size. `litPanel` and `hinge` appear on a foldable only.
+    public struct SceneOptions: Sendable {
+        public var width: Int
+        public var height: Int
+        /// `transparent` or `#RRGGBB`.
+        public var background: String
+        /// Model bundle directories searched after baguette's own roots —
+        /// an embedding host that carries the catalog itself hands its
+        /// unpacked copy in here.
+        public var fallbackModelRoots: [URL]
+
+        public init(
+            width: Int = 1024,
+            height: Int = 1024,
+            background: String = "#eef1f5",
+            fallbackModelRoots: [URL] = []
+        ) {
+            self.width = width
+            self.height = height
+            self.background = background
+            self.fallbackModelRoots = fallbackModelRoots
+        }
+    }
+
+    /// One standing 3D stage and what feeds it.
+    private final class SceneState: @unchecked Sendable {
+        /// Baguette's live 3D stream opens on this three-quarter view.
+        static let initialRotation = DeviceRotation(x: -8, y: 18, z: 0)
+
+        let stage: RealityKitDeviceScene
+        let foldable: RenderedFoldable?
+        let rendered: RenderedScreen?
+        let panels: DisplayPanels
+        let canvas: RenderDimensions
+        private let lock = NSLock()
+        private var camera = Device3DCamera(rotation: SceneState.initialRotation, zoom: 1)
+
+        init(
+            stage: RealityKitDeviceScene, foldable: RenderedFoldable?, rendered: RenderedScreen?,
+            panels: DisplayPanels, canvas: RenderDimensions
+        ) {
+            self.stage = stage
+            self.foldable = foldable
+            self.rendered = rendered
+            self.panels = panels
+            self.canvas = canvas
+        }
+
+        /// Recompose the retained frames after a camera or pose change.
+        func refresh() {
+            foldable?.refresh()
+            rendered?.refresh()
+        }
+
+        /// Turns the model. Out-of-range values are clamped to what the
+        /// stage accepts, as the live stream's `set_3d_camera` does.
+        func move(rotation: (x: Double, y: Double, z: Double), zoom: Double) {
+            let clamp = { (value: Double, range: ClosedRange<Double>) -> Double in
+                value.isFinite ? min(max(value, range.lowerBound), range.upperBound) : range.lowerBound
+            }
+            let next = lock.withLock {
+                camera = Device3DCamera(
+                    rotation: DeviceRotation(
+                        x: clamp(rotation.x, -80...80),
+                        y: clamp(rotation.y, -180...180),
+                        z: clamp(rotation.z, -180...180)
+                    ),
+                    zoom: clamp(zoom, 0.5...3),
+                    orientation: camera.orientation
+                )
+                return camera
+            }
+            stage.update(camera: next)
+            refresh()
+        }
+
+        /// The guest's interface orientation, from the lit panel's own
+        /// screen properties: a foldable then stands the way it is held.
+        func follow(orientation: DeviceOrientation) {
+            let next: Device3DCamera? = lock.withLock {
+                guard camera.orientation != orientation else { return nil }
+                camera = Device3DCamera(rotation: camera.rotation, zoom: camera.zoom, orientation: orientation)
+                return camera
+            }
+            guard let next else { return }
+            stage.update(camera: next)
+            refresh()
+        }
+
+        func placementJSON() -> String? {
+            let view = lock.withLock { camera }
+            let corners = { (quad: ScreenQuad) -> [[Double]] in
+                [
+                    [quad.topLeft.u, quad.topLeft.v],
+                    [quad.topRight.u, quad.topRight.v],
+                    [quad.bottomRight.u, quad.bottomRight.v],
+                    [quad.bottomLeft.u, quad.bottomLeft.v],
+                ]
+            }
+            let pieces: [[String: Any]]
+            if let list = stage.screenPieces {
+                pieces = list.map { piece in
+                    [
+                        "corners": corners(piece.quad),
+                        "u": [piece.u.lowerBound, piece.u.upperBound],
+                        "v": [piece.v.lowerBound, piece.v.upperBound],
+                    ]
+                }
+            } else if let quad = stage.screenQuad {
+                pieces = [["corners": corners(quad), "u": [0.0, 1.0], "v": [0.0, 1.0]]]
+            } else {
+                return nil
+            }
+            var object: [String: Any] = [
+                "type": "scene",
+                "canvas": ["width": canvas.width, "height": canvas.height],
+                "pieces": pieces,
+                "buttons": (stage.screenButtons ?? []).map { mark in
+                    ["id": mark.id, "at": [mark.at.u, mark.at.v], "control": [mark.control.u, mark.control.v]]
+                },
+                "camera": [
+                    "rotation": ["x": view.rotation.x, "y": view.rotation.y, "z": view.rotation.z],
+                    "zoom": view.zoom,
+                ],
+            ]
+            let lit = stage.litPanel
+            if let panel = lit.flatMap({ panels.panel($0) }) ?? panels.main {
+                object["screen"] = [
+                    "screenId": Int(panel.screenID),
+                    "pointWidth": Double(panel.pointSize.width),
+                    "pointHeight": Double(panel.pointSize.height),
+                ]
+            }
+            if let lit { object["litPanel"] = lit == .primary ? "primary" : "secondary" }
+            if let pose = foldable?.pose { object["hinge"] = ["degrees": pose.hingeDegrees] }
+            guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+                return nil
+            }
+            return String(decoding: data, as: UTF8.self)
+        }
+    }
+
+    /// The scene, when this capture renders one.
+    private var scene: SceneState?
 
     /// Conversion state kept per panel of a foldable, so a panel that has
     /// not drawn since its last conversion is not converted again.
@@ -119,6 +292,108 @@ public final class RawFrameCapture: @unchecked Sendable {
         )
     }
 
+    /// Starts frame delivery of the device on its 3D model (see
+    /// `SceneOptions`). Loading the model and standing the stage up takes
+    /// seconds and happens before this returns; the RealityKit stage is
+    /// main-actor bound, so the process's main dispatch queue must be
+    /// serviced and this must not be called on it. Throws when no
+    /// installed model covers the device.
+    public func start(
+        scene options: SceneOptions,
+        idleInterval: TimeInterval = 0.25,
+        onFrame: @escaping @Sendable (Payload) -> Void
+    ) throws {
+        guard let sim = simulators.find(udid: udid) else {
+            throw BaguetteCoreError.notFound("Device \(udid) not found")
+        }
+        let models = try LiveDeviceModels(rootURLs: DeviceModelRoots.standard() + options.fallbackModelRoots)
+        guard let model = try sim.deviceModel(in: models) else {
+            throw BaguetteCoreError.notFound("no 3D model covers \(sim.deviceTypeName)")
+        }
+        let background: DeviceRenderBackground
+        if options.background == "transparent" {
+            background = .transparent
+        } else if options.background.range(of: #"^#[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil {
+            background = .color(options.background)
+        } else {
+            throw BaguetteCoreError.invalidArgument("background must be transparent or #RRGGBB")
+        }
+        guard options.width > 0, options.height > 0 else {
+            throw BaguetteCoreError.invalidArgument("size must be positive")
+        }
+        let canvas = RenderDimensions(width: options.width, height: options.height)
+        let plan = try DeviceRenderPlan.build(
+            model: model, variants: [:], rotation: SceneState.initialRotation,
+            outputSize: canvas, fit: .cover, background: background
+        )
+        let stage = try RealityKitDeviceScene(plan: plan)
+        let panels = ActiveDisplays.panels(of: simulators.resolveDevice(udid: udid))
+        self.scale = 1
+        self.idleInterval = max(0.008, idleInterval)
+        self.onFrame = onFrame
+        let state: SceneState
+        let screen: any Screen
+        if plan.model.definition.scene.fold != nil {
+            // A foldable: both panels on the book's two screens, the hinge
+            // posing it; the lit panel is Core Device's call, as everywhere.
+            let book = RenderedFoldable(
+                unfolded: sim.displays().panel(.secondary).screen(),
+                cover: sim.displays().panel(.primary).screen(),
+                hinge: sim.hinge(),
+                litPanel: { sim.litPanel() ?? .primary },
+                scene: stage,
+                onPose: { [weak self] in self?.restatePlacement() }
+            )
+            state = SceneState(stage: stage, foldable: book, rendered: nil, panels: panels, canvas: canvas)
+            screen = book
+        } else {
+            let rendered = RenderedScreen(source: sim.screen(), scene: stage)
+            state = SceneState(stage: stage, foldable: nil, rendered: rendered, panels: panels, canvas: canvas)
+            screen = rendered
+        }
+        scene = state
+        self.screen = screen
+        state.move(rotation: (SceneState.initialRotation.x, SceneState.initialRotation.y, SceneState.initialRotation.z), zoom: 1)
+        try screen.start(
+            onFrame: { [weak self] surface in
+                self?.handle(surface)
+            },
+            onMetadata: { [weak self] metadata in
+                guard let self else { return }
+                self.handle(metadata)
+                // The screen properties that pass through are the lit
+                // panel's; the book stands the way the guest is held.
+                if let raw = metadata.uiOrientation?.rawValue,
+                   let orientation = DeviceOrientation(rawValue: raw) {
+                    state.follow(orientation: orientation)
+                    self.restatePlacement()
+                }
+            }
+        )
+        restatePlacement()
+    }
+
+    /// Turns the model of a capture started with `start(scene:)`:
+    /// `rotation` in degrees about X, Y and Z, `zoom` 0.5…3. The placement
+    /// is restated with the next frame. A plain capture ignores this.
+    public func setCamera(rotation: (x: Double, y: Double, z: Double), zoom: Double) {
+        guard let scene else { return }
+        scene.move(rotation: rotation, zoom: zoom)
+        restatePlacement()
+    }
+
+    /// Hands the viewer the scene's current placement; a frame is emitted
+    /// only when it moved.
+    private func restatePlacement() {
+        guard let scene, let json = scene.placementJSON() else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            if self.payloadCache.update(placementJSON: json) {
+                self.emitCached()
+            }
+        }
+    }
+
     public func stop() {
         // Stop the screen first so no new frames get enqueued, then flush
         // the capture queue and clear the callback on it — after this
@@ -134,6 +409,7 @@ public final class RawFrameCapture: @unchecked Sendable {
             panelConversions.removeAll()
             canvas = nil
             onFrame = nil
+            scene = nil
         }
     }
 
@@ -401,6 +677,16 @@ struct RawFramePayloadCache {
     /// presenting panel; its own mirroring is its own inverse, which gives
     /// back the value every panel restates for itself.
     private(set) var layoutJSON: String?
+    /// A 3D capture's placement, in the layout's place on the wire.
+    private var placementJSON: String?
+
+    /// Records the scene placement. Returns whether it moved, so a
+    /// restatement that says what the viewer already heard emits nothing.
+    mutating func update(placementJSON json: String) -> Bool {
+        guard json != placementJSON else { return false }
+        placementJSON = json
+        return true
+    }
 
     /// Serialised when something it states has moved, not per frame.
     private mutating func restateLayout() {
@@ -435,6 +721,7 @@ struct RawFramePayloadCache {
         presenting = nil
         hingeDegrees = nil
         layoutJSON = nil
+        placementJSON = nil
     }
 
     func withPayload(
@@ -442,7 +729,7 @@ struct RawFramePayloadCache {
         _ body: (RawFrameCapture.Payload) -> Void
     ) {
         guard !planes.isEmpty else { return }
-        let layoutJSON = layoutJSON
+        let layoutJSON = placementJSON ?? layoutJSON
         planes.withUnsafeBytes { raw in
             body(RawFrameCapture.Payload(
                 width: width,
