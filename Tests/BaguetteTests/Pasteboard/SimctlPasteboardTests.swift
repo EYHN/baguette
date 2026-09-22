@@ -15,10 +15,14 @@ struct SimctlPasteboardTests {
         var executable: URL?
         var arguments: [String]?
         var stdin: Data?
+        /// Every argv handed to the stdin-carrying `run`, in order.
+        var writes: [[String]] = []
     }
 
+    /// `exitCode` answers every spawn; `devicectlExit` overrides the
+    /// Core Device copy so the fallback can be driven.
     private func makePasteboard(
-        exitCode: Int32 = 0, stdout: Data? = nil
+        exitCode: Int32 = 0, devicectlExit: Int32? = nil, stdout: Data? = nil
     ) -> (SimctlPasteboard, Captures) {
         let sub = MockSubprocess()
         let captures = Captures()
@@ -28,7 +32,12 @@ struct SimctlPasteboardTests {
             captures.executable = exe
             captures.arguments = args
             captures.stdin = stdin
-            onExit(exitCode)
+            captures.writes.append(args)
+            if args.first == "devicectl", let devicectlExit {
+                onExit(devicectlExit)
+            } else {
+                onExit(exitCode)
+            }
         }
         given(sub).run(
             executable: .any, arguments: .any, onBytes: .any, onExit: .any
@@ -42,13 +51,35 @@ struct SimctlPasteboardTests {
         return (SimctlPasteboard(udid: "U", subprocess: sub), captures)
     }
 
-    @Test func `setText spawns xcrun simctl pbcopy with the text on stdin`() async throws {
+    @Test func `setText asks devicectl first with the text on stdin`() async throws {
         let (pasteboard, captures) = makePasteboard()
         try await pasteboard.setText("hi")
 
         #expect(captures.executable == URL(fileURLWithPath: "/usr/bin/xcrun"))
-        #expect(captures.arguments == ["simctl", "pbcopy", "U"])
+        #expect(captures.writes == [["devicectl", "device", "pasteboard", "copy", "--device", "U"]])
         #expect(captures.stdin == Data("hi".utf8))
+    }
+
+    @Test func `setText falls back to simctl pbcopy when devicectl refuses`() async throws {
+        // Xcode 26 has no `pasteboard` subcommand (usage error, 64);
+        // a device Core Device does not know exits 1. Either way the
+        // legacy route gets the same bytes.
+        for refusal: Int32 in [64, 1] {
+            let (pasteboard, captures) = makePasteboard(devicectlExit: refusal)
+            try await pasteboard.setText("hi")
+            #expect(captures.writes == [
+                ["devicectl", "device", "pasteboard", "copy", "--device", "U"],
+                ["simctl", "pbcopy", "U"],
+            ])
+            #expect(captures.stdin == Data("hi".utf8))
+        }
+    }
+
+    @Test func `setText reports the pbcopy status when both routes fail`() async throws {
+        let (pasteboard, _) = makePasteboard(exitCode: 3, devicectlExit: 1)
+        await #expect(throws: PasteboardError.simctlFailed(status: 3)) {
+            try await pasteboard.setText("hi")
+        }
     }
 
     @Test func `setText sends UTF-8 bytes for non-ASCII text`() async throws {
