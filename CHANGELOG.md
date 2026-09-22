@@ -12,6 +12,18 @@ For releases prior to this changelog, see the
 
 ---
 
+## [0.2.0] - 2026-09-22
+
+### Changed
+* ci: drop the Xcode 27 job's weekly schedule by @crockalet in https://github.com/tddworks/baguette/pull/83
+* fix(pasteboard): write through devicectl before simctl pbcopy by @EYHN in https://github.com/tddworks/baguette/pull/84
+
+## New Contributors
+* @EYHN made their first contribution in https://github.com/tddworks/baguette/pull/84
+
+
+---
+
 ## [0.1.99] - 2026-09-19
 
 ### Added
@@ -1236,7 +1248,8 @@ For releases prior to this changelog, see the
 
 ---
 
-[Unreleased]: https://github.com/tddworks/baguette/compare/v0.1.99...HEAD
+[Unreleased]: https://github.com/tddworks/baguette/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tddworks/baguette/compare/v0.1.99...v0.2.0
 [0.1.99]: https://github.com/tddworks/baguette/compare/v0.1.98...v0.1.99
 [0.1.98]: https://github.com/tddworks/baguette/compare/v0.1.97...v0.1.98
 [0.1.97]: https://github.com/tddworks/baguette/compare/v0.1.96...v0.1.97
