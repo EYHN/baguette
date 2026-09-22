@@ -1,7 +1,7 @@
 import Testing
 import ArgumentParser
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Argv wiring + validation for `baguette record`. `run()` talks to
 /// CoreSimulators, AVFoundation and signals, so it stays integration-only

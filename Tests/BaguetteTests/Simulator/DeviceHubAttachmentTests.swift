@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Xcode 27's Device Hub attaches a guest HID daemon (`dtuhidd`) to every
 /// booted simulator. It announces itself through one Darwin notify state

@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// A staged camera source lands in a directory named after the
 /// simulator it belongs to, and that udid arrives straight off the

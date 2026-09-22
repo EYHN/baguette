@@ -3,7 +3,7 @@ import Foundation
 import IOSurface
 import Mockable
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 final class LockedChunks: @unchecked Sendable {
     private let lock = NSLock()

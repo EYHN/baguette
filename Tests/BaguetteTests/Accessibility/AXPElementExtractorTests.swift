@@ -1,14 +1,14 @@
 import Testing
 import Foundation
 import CoreGraphics
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Unit tests for the static element-reading helpers on
 /// `AXPTranslatorAccessibility`. These extract values out of the
 /// `AXPMacPlatformElement` returned by AXPTranslator's XPC round-
 /// trip; the production calls hand a real ObjC element in. Here
 /// we drive the same helpers with `FakeAXElement` — an `NSObject`
-/// subclass that overrides the KVC / selector surface — so the
+/// subclass that answers the selectors the reader asks — so the
 /// helper logic can be exercised without a booted simulator.
 @Suite("AXPTranslatorAccessibility element extractors")
 struct AXPElementExtractorTests {
@@ -163,6 +163,21 @@ final class FakeAXElement: NSObject {
         if let n = numbers[key] { return n }
         if let a = any[key]     { return a }
         return nil
+    }
+
+    // The reader asks through selectors, never KVC (an `AXPMacPlatformElement`
+    // raises for a key it lacks). These are the selectors the tests read,
+    // answered from the same tables; a key with no selector here is one
+    // the element "does not respond to".
+    @objc dynamic func accessibilityRole() -> Any? { value(forKey: "accessibilityRole") }
+    @objc dynamic func accessibilityLabel() -> Any? { value(forKey: "accessibilityLabel") }
+    @objc dynamic func accessibilityValue() -> Any? { value(forKey: "accessibilityValue") }
+    @objc dynamic func accessibilityEnabled() -> Bool { numbers["accessibilityEnabled"]?.boolValue ?? false }
+    override func responds(to aSelector: Selector!) -> Bool {
+        // Only a key that was given answers, as a real element only
+        // implements the getters it has.
+        if aSelector == #selector(accessibilityEnabled) { return numbers["accessibilityEnabled"] != nil }
+        return super.responds(to: aSelector)
     }
 }
 

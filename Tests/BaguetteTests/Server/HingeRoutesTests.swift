@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `GET /simulators/<udid>/hinge` — what the page polls on a foldable
 /// to learn that the pose changed under it, so it can re-bind the
@@ -12,6 +12,7 @@ struct HingeRoutesTests {
 
     private func wiring(
         deviceType: String, panels: [IntegratedPanel], angle: HingeAngle?,
+        lit: IntegratedPanel? = nil,
         orientation: DeviceOrientation? = nil
     ) -> (MockSimulators, MockChromes) {
         let simulators = MockSimulators()
@@ -32,6 +33,7 @@ struct HingeRoutesTests {
             size: Size(width: 2007, height: 2853), orientation: orientation
         ))
         given(hinge).angle().willReturn(angle)
+        given(sim).litPanel().willReturn(lit)
         given(chromes).panels(forDeviceName: .value(deviceType)).willReturn(panels)
         return (simulators, chromes)
     }
@@ -41,7 +43,7 @@ struct HingeRoutesTests {
     @Test func `an open foldable reports its angle, the unfolded panel and its orientation`() {
         let (simulators, chromes) = wiring(
             deviceType: "iPhone Duo", panels: [.primary, .secondary],
-            angle: HingeAngle(degrees: 130), orientation: .landscapeLeft)
+            angle: HingeAngle(degrees: 130), lit: .secondary, orientation: .landscapeLeft)
         let json = Server.hingeJSON(udid: "U", simulators: simulators, chromes: chromes)
         #expect(json == #"{"ok":true,"foldable":true,"angleDegrees":130.0,"litPanel":"secondary","orientation":"landscape-left"}"#)
     }
@@ -49,9 +51,21 @@ struct HingeRoutesTests {
     @Test func `a folded foldable reports the cover`() {
         let (simulators, chromes) = wiring(
             deviceType: "iPhone Duo", panels: [.primary, .secondary],
-            angle: HingeAngle(degrees: 3.2), orientation: .portrait)
+            angle: HingeAngle(degrees: 3.2), lit: .primary, orientation: .portrait)
         let json = Server.hingeJSON(udid: "U", simulators: simulators, chromes: chromes)
         #expect(json == #"{"ok":true,"foldable":true,"angleDegrees":3.2,"litPanel":"primary","orientation":"portrait"}"#)
+    }
+
+    /// The angle and the panel are two facts. The pose provider lights
+    /// the unfolded panel at 30° on the way shut and the cover at 30° on
+    /// a fresh boot; the page is told what Core Device says, whatever
+    /// the angle.
+    @Test func `the lit panel is Core Device's answer, not read off the angle`() {
+        let (simulators, chromes) = wiring(
+            deviceType: "iPhone Duo", panels: [.primary, .secondary],
+            angle: HingeAngle(degrees: 30), lit: .secondary, orientation: .landscapeLeft)
+        let json = Server.hingeJSON(udid: "U", simulators: simulators, chromes: chromes)
+        #expect(json == #"{"ok":true,"foldable":true,"angleDegrees":30.0,"litPanel":"secondary","orientation":"landscape-left"}"#)
     }
 
     /// A reading that did not arrive is reported as such, and the panel

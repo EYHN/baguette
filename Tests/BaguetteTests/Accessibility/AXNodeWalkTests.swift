@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Walk-tree-into-AXNode tests against `FakeAXTreeElement` —
 /// `NSObject` subclasses that override KVC and the
@@ -227,6 +227,23 @@ final class FakeAXTreeElement: NSObject {
         }
         return nil
     }
+
+    // The reader asks through selectors, never KVC: an `AXPMacPlatformElement`
+    // raises `NSUnknownKeyException` for a key it lacks, and a selector it
+    // lacks simply fails `responds(to:)`. Each getter below is the same
+    // selector the production element implements, answered from the KVC
+    // tables so a fixture reads identically either way.
+    @objc dynamic func accessibilityRole() -> String? { strings["accessibilityRole"] }
+    @objc dynamic func accessibilitySubrole() -> String? { strings["accessibilitySubrole"] }
+    @objc dynamic func accessibilityLabel() -> String? { strings["accessibilityLabel"] }
+    @objc dynamic func accessibilityIdentifier() -> String? { strings["accessibilityIdentifier"] }
+    @objc dynamic func accessibilityTitle() -> String? { strings["accessibilityTitle"] }
+    @objc dynamic func accessibilityHelp() -> String? { strings["accessibilityHelp"] }
+    @objc dynamic func accessibilityValue() -> Any? { numberValue ?? strings["accessibilityValue"] }
+    @objc dynamic func accessibilityChildren() -> Any? { value(forKey: "accessibilityChildren") }
+    @objc dynamic func isAccessibilityEnabled() -> Bool { booleans["isAccessibilityEnabled"] ?? booleans["accessibilityEnabled"] ?? true }
+    @objc dynamic func isAccessibilityFocused() -> Bool { booleans["isAccessibilityFocused"] ?? booleans["accessibilityFocused"] ?? false }
+    @objc dynamic func isAccessibilityHidden() -> Bool { booleans["isAccessibilityHidden"] ?? booleans["accessibilityHidden"] ?? false }
 
     /// Match the typed IMP cast the walk uses to read CGRect-
     /// returning selectors. Declared `@objc dynamic` so the

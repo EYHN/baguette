@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// One monitor per device. Every stream socket on a foldable wants the
 /// sweep and every bind wants the current angle; spawning a devicectl
@@ -16,10 +16,12 @@ struct SharedHingeTests {
         let hinge = MockHinge()
         let watch = MockHingeWatch()
         var onAngle: (@Sendable (HingeAngle) -> Void)?
+        var onEnd: (@Sendable () -> Void)?
         var watches = 0
         init() {
-            given(hinge).watch(onAngle: .any).willProduce { [self] cb in
+            given(hinge).watch(onAngle: .any, onEnd: .any).willProduce { [self] cb, end in
                 self.onAngle = cb
+                self.onEnd = end
                 self.watches += 1
                 return self.watch
             }
@@ -28,6 +30,21 @@ struct SharedHingeTests {
     }
 
     final class Seen: @unchecked Sendable { var angles: [Double] = [] }
+
+    /// Restarts run on demand: the test decides when the delay is over.
+    final class Scheduler: @unchecked Sendable {
+        var pending: [(delay: TimeInterval, item: DispatchWorkItem)] = []
+        func schedule(_ delay: TimeInterval, _ work: @escaping @Sendable () -> Void) -> DispatchWorkItem {
+            let item = DispatchWorkItem(block: work)
+            pending.append((delay, item))
+            return item
+        }
+        func runAll() {
+            let due = pending
+            pending = []
+            for (_, item) in due where !item.isCancelled { item.perform() }
+        }
+    }
 
     @Test func `subscribers share one inner watch and all receive each sample`() {
         let inner = Inner()
@@ -201,6 +218,113 @@ struct SharedHingeTests {
         try shared.fold(to: 130, over: 0.8)
 
         verify(motor).fold(from: .value(0), to: .value(130), over: .value(0.8)).called(1)
+    }
+
+    // MARK: - the monitor dies
+
+    /// A devicectl monitor that was killed (or crashed, or timed out)
+    /// once left `angle()` answering its last sample for the rest of
+    /// the process — the watch was still "running" as far as the
+    /// bookkeeping knew. An ended watch is forgotten at once.
+    @Test func `when the monitor ends, the angle is no longer its last sample`() {
+        let inner = Inner()
+        given(inner.hinge).angle().willReturn(HingeAngle(degrees: 120))
+        var now = Date(timeIntervalSince1970: 1000)
+        let scheduler = Scheduler()
+        let shared = SharedHinge(inner: inner.hinge, now: { now }, schedule: scheduler.schedule)
+        let w = shared.watch { _ in }
+        inner.onAngle?(HingeAngle(degrees: 22))
+        inner.onEnd?()
+        now = now.addingTimeInterval(SharedHinge.gracePeriod + 1)
+        #expect(shared.angle() == HingeAngle(degrees: 120))
+        verify(inner.hinge).angle().called(1)
+        w.cancel()
+    }
+
+    @Test func `a monitor that ends after speaking is started again at once for its subscribers`() {
+        let inner = Inner()
+        let scheduler = Scheduler()
+        let shared = SharedHinge(inner: inner.hinge, schedule: scheduler.schedule)
+        let seen = Seen()
+        let w = shared.watch { seen.angles.append($0.degrees) }
+        inner.onAngle?(HingeAngle(degrees: 22))
+        inner.onEnd?()
+        #expect(scheduler.pending.map(\.delay) == [0])
+        scheduler.runAll()
+        #expect(inner.watches == 2)
+        inner.onAngle?(HingeAngle(degrees: 95))
+        #expect(seen.angles == [22, 95])
+        #expect(shared.angle() == HingeAngle(degrees: 95))
+        w.cancel()
+    }
+
+    /// A device that is shut down, or has no hinge, makes devicectl
+    /// quit at once with nothing said. Trying again forever at full
+    /// speed would be a spawn storm; the pause grows instead.
+    @Test func `a monitor that ends without speaking is retried after a growing pause`() {
+        let inner = Inner()
+        let scheduler = Scheduler()
+        let shared = SharedHinge(inner: inner.hinge, schedule: scheduler.schedule)
+        let w = shared.watch { _ in }
+        var delays: [TimeInterval] = []
+        for _ in 0..<8 {
+            inner.onEnd?()
+            delays.append(scheduler.pending.last!.delay)
+            scheduler.runAll()
+        }
+        #expect(delays == [1, 2, 4, 8, 16, 32, 60, 60])
+        #expect(inner.watches == 9)
+        // Once it speaks, the slate is clean.
+        inner.onAngle?(HingeAngle(degrees: 3))
+        inner.onEnd?()
+        #expect(scheduler.pending.last!.delay == 0)
+        w.cancel()
+    }
+
+    @Test func `no restart is scheduled once the last subscriber has left`() {
+        let inner = Inner()
+        let scheduler = Scheduler()
+        let shared = SharedHinge(inner: inner.hinge, schedule: scheduler.schedule)
+        let w = shared.watch { _ in }
+        inner.onEnd?()
+        #expect(scheduler.pending.count == 1)
+        w.cancel()
+        #expect(scheduler.pending[0].item.isCancelled)
+        scheduler.runAll()
+        #expect(inner.watches == 1)
+    }
+
+    @Test func `an end reported by a replaced monitor changes nothing`() {
+        let inner = Inner()
+        let scheduler = Scheduler()
+        let shared = SharedHinge(inner: inner.hinge, schedule: scheduler.schedule)
+        let w = shared.watch { _ in }
+        let staleEnd = inner.onEnd
+        inner.onAngle?(HingeAngle(degrees: 22))
+        inner.onEnd?()
+        scheduler.runAll()
+        #expect(inner.watches == 2)
+        inner.onAngle?(HingeAngle(degrees: 40))
+        staleEnd?()
+        #expect(scheduler.pending.isEmpty)
+        #expect(shared.angle() == HingeAngle(degrees: 40))
+        w.cancel()
+    }
+
+    /// A foldable's hinge is followed for the life of the process, so
+    /// its angle is always the last sample heard.
+    @Test func `keepWatching holds one inner watch open with no other subscriber, once`() {
+        let inner = Inner()
+        let shared = SharedHinge(inner: inner.hinge)
+        shared.keepWatching()
+        shared.keepWatching()
+        #expect(inner.watches == 1)
+        inner.onAngle?(HingeAngle(degrees: 130))
+        let w = shared.watch { _ in }
+        w.cancel()
+        verify(inner.watch).cancel().called(0)
+        #expect(shared.angle() == HingeAngle(degrees: 130))
+        verify(inner.hinge).angle().called(0)
     }
 
     /// The same device always gets the same shared hinge, whoever asks.

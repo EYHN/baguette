@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// On iPhone Duo the legacy button path lands on a touchscreen service
 /// and SpringBoard ignores it; the keys Device Hub presses ride the guest
@@ -51,8 +51,12 @@ struct FoldableInputTests {
         verify(touches).button(.value(.home), duration: .value(0)).called(1)
     }
 
-    @Test func `a key the guest refuses is a failed press`() {
-        let (input, _, _) = make(refusing: true)
-        #expect(input.button(.volumeUp, duration: 0) == false)
+    @Test func `a key the guest has no tool for falls back to the host's own press`() {
+        // A build without `HingeControl` — a host embedding the library
+        // without its resource bundle — still has the legacy button path.
+        let (input, touches, _) = make(refusing: true)
+        given(touches).button(.any, duration: .any).willReturn(true)
+        #expect(input.button(.volumeUp, duration: 0) == true)
+        verify(touches).button(.value(.volumeUp), duration: .value(0)).called(1)
     }
 }

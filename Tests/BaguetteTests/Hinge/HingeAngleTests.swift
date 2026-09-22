@@ -1,5 +1,5 @@
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 /// A foldable's hinge angle, as `devicectl device motion hinge-angle`
 /// reports it, and which panel that angle leaves lit.
@@ -37,24 +37,5 @@ struct HingeAngleTests {
     @Test func `an invalid sample is not an angle`() {
         let line = "• +0.000s : Angle:  0.0°  Mech:  0.0°  Velocity:+0.0°/s  AngleValid:N  VelocityValid:N  Range:0-180°"
         #expect(HingeAngle.parse(devicectlLine: line) == nil)
-    }
-
-    // MARK: - lit panel
-
-    @Test func `closed lights the cover`() {
-        #expect(HingeAngle(degrees: 0).litPanel == .primary)
-        #expect(HingeAngle(degrees: 3.2).litPanel == .primary)
-        #expect(HingeAngle(degrees: 60).litPanel == .primary)
-    }
-
-    @Test func `open lights the unfolded panel`() {
-        #expect(HingeAngle(degrees: 180).litPanel == .secondary)
-        #expect(HingeAngle(degrees: 130).litPanel == .secondary)
-        #expect(HingeAngle(degrees: 90).litPanel == .secondary)
-    }
-
-    @Test func `the swap boundary is where SpringBoard's partially-open region begins`() {
-        #expect(HingeAngle(degrees: HingeAngle.openBoundaryDegrees).litPanel == .secondary)
-        #expect(HingeAngle(degrees: HingeAngle.openBoundaryDegrees - 1).litPanel == .primary)
     }
 }

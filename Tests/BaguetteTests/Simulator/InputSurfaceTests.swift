@@ -1,6 +1,6 @@
 import Testing
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Default-impl behaviour on `InputSurface`: `heal` is the one verb the
 /// App layer calls — after a boot, or on `baguette heal` — and it only

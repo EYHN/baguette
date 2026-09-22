@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Orchestration coverage for `SimctlInputSurface` — the argv it sends
 /// through `Subprocess` to ask whether Device Hub has shadowed a

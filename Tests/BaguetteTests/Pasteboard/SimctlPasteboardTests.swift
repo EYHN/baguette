@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Mockable
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Orchestration coverage for `SimctlPasteboard` — argv assembly, the
 /// stdin handoff for `pbcopy`, and the `Subprocess` exit handshake.

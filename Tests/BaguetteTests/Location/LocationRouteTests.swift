@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// Pure-value coverage for `LocationRoute.startArguments` — the argv tail
 /// handed to `xcrun simctl location <udid> start …`. simctl interpolates

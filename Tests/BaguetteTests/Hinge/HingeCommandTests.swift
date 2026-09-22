@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import Baguette
+@testable import BaguetteCore
 
 /// `POST /simulators/<udid>/hinge` and `baguette hinge`: a pose by name —
 /// Device Hub's three — or an angle, swept over a duration.

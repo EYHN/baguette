@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import Baguette
+@testable import BaguetteCore
 
 @Suite("DeviceModelDefinition")
 struct DeviceModelDefinitionTests {
