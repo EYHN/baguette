@@ -54,6 +54,9 @@ public final class RawFrameCapture: @unchecked Sendable {
     private let queue = DispatchQueue(label: "baguette.rawcapture", qos: .userInteractive)
 
     private var screen: (any Screen)?
+    /// The standing hinge subscription, foldables only. Its samples restate
+    /// the layout, so a viewer hears the angle without polling.
+    private var hingeWatch: (any HingeWatch)?
     private var dispatcher: GestureDispatcher?
     private var input: (any Input)?
     private var pump: DispatchSourceTimer?
@@ -83,6 +86,23 @@ public final class RawFrameCapture: @unchecked Sendable {
         // re-emits are cached-payload only, so the floor is just a guard.
         self.idleInterval = max(0.008, idleInterval)
         self.onFrame = onFrame
+        if let core = sim as? CoreSimulator, core.folds {
+            let hinge = sim.hinge()
+            let initial = hinge.angle()?.degrees
+            hingeWatch = hinge.watch { [weak self] angle in
+                self?.queue.async {
+                    guard let self else { return }
+                    if self.payloadCache.update(hingeDegrees: angle.degrees) {
+                        self.emitCached()
+                    }
+                }
+            }
+            if let initial {
+                queue.async { [weak self] in
+                    _ = self?.payloadCache.update(hingeDegrees: initial)
+                }
+            }
+        }
         let screen = sim.screen()
         self.screen = screen
         // A foldable streams all its panels on one fixed canvas.
@@ -103,6 +123,8 @@ public final class RawFrameCapture: @unchecked Sendable {
         // Stop the screen first so no new frames get enqueued, then flush
         // the capture queue and clear the callback on it — after this
         // returns, the host may safely free its callback context.
+        hingeWatch?.cancel()
+        hingeWatch = nil
         screen?.stop()
         screen = nil
         queue.sync {
@@ -352,6 +374,9 @@ struct RawFramePayloadCache {
     private var uiOrientationRaw: UInt32 = 0
     private var canvas: DisplayCanvas?
     private var presenting: DisplayPanel?
+    /// Whole degrees. A sweep is dozens of samples a second; the layout
+    /// is restated only when the rounded angle moves.
+    private var hingeDegrees: Double?
 
     /// A foldable's layout, stated once and whenever its presenting panel
     /// moves.
@@ -360,6 +385,16 @@ struct RawFramePayloadCache {
         self.canvas = canvas
         self.presenting = presenting
         restateLayout()
+    }
+
+    /// Records the hinge. Returns whether the layout changed, so a sample
+    /// that rounds to the angle already stated does not emit a frame.
+    mutating func update(hingeDegrees degrees: Double) -> Bool {
+        let quantized = degrees.rounded()
+        guard hingeDegrees != quantized else { return false }
+        hingeDegrees = quantized
+        restateLayout()
+        return true
     }
 
     /// `uiOrientationRaw` is already in the phone convention for the
@@ -372,7 +407,8 @@ struct RawFramePayloadCache {
         layoutJSON = canvas.map {
             $0.layoutJSON(
                 activeScreenID: presenting?.screenID,
-                uiOrientationRaw: presenting?.canonicalUIOrientation(Int(uiOrientationRaw)) ?? Int(uiOrientationRaw)
+                uiOrientationRaw: presenting?.canonicalUIOrientation(Int(uiOrientationRaw)) ?? Int(uiOrientationRaw),
+                hingeDegrees: hingeDegrees
             )
         }
     }
@@ -397,6 +433,7 @@ struct RawFramePayloadCache {
         uiOrientationRaw = 0
         canvas = nil
         presenting = nil
+        hingeDegrees = nil
         layoutJSON = nil
     }
 

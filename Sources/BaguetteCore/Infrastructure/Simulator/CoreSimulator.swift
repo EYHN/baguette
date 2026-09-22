@@ -106,6 +106,13 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
     /// pose, for `ActiveDisplays` to know when to ask Core Device which
     /// panel lit — and never a spawn away. A phone has no hinge and
     /// is not followed.
+    /// Whether this device type folds. A phone has one built-in display;
+    /// a foldable (iPhone Duo) has two, and is the only kind whose hinge
+    /// is worth a standing monitor.
+    var folds: Bool {
+        ActiveDisplays.panels(of: host.resolveDevice(udid: udid)).isFoldable
+    }
+
     func hinge() -> any Hinge {
         let shared = SharedHinge.forDevice(
             udid, make: { DevicectlHinge(udid: udid) }, motor: GuestHingeMotor.forDevice(udid)

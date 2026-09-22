@@ -50,8 +50,11 @@ struct DisplayCanvas: Equatable, Sendable {
     /// The description that travels beside each frame.
     /// `uiOrientationRaw` is SimulatorKit's value, which both panels
     /// report alike; each panel restates it in the phone convention.
-    func layoutJSON(activeScreenID: UInt32?, uiOrientationRaw: Int) -> String {
-        let layout: [String: Any] = [
+    /// `hingeDegrees` is the foldable's hinge, when it is known: the
+    /// stream says the angle instead of leaving viewers to guess it
+    /// from which panel is lit. Nil on a device that does not fold.
+    func layoutJSON(activeScreenID: UInt32?, uiOrientationRaw: Int, hingeDegrees: Double? = nil) -> String {
+        var layout: [String: Any] = [
             "canvas": ["width": width, "height": height],
             "panels": regions.map { region -> [String: Any] in
                 [
@@ -67,6 +70,9 @@ struct DisplayCanvas: Equatable, Sendable {
                 ]
             },
         ]
+        if let hingeDegrees {
+            layout["hinge"] = ["degrees": hingeDegrees]
+        }
         let data = try! JSONSerialization.data(withJSONObject: layout, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
     }
