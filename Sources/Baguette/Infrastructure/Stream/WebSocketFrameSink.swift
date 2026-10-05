@@ -42,10 +42,13 @@ final class WebSocketFrameSink: FrameSink, @unchecked Sendable {
     private var mjpegHeaderSkipped = false
     private var avccBuffer = Data()
 
-    init(outbound: WebSocketOutboundWriter, format: StreamFormat) {
+    /// `preservingDescriptions` is off for `frameMetadata=1` streams,
+    /// whose packets are already framed and carry their own description
+    /// messages — see `FrameBacklog`.
+    init(outbound: WebSocketOutboundWriter, format: StreamFormat, preservingDescriptions: Bool = true) {
         self.outbound = outbound
         self.format = format
-        self.backlog = FrameBacklog(format: format)
+        self.backlog = FrameBacklog(format: format, preservingDescriptions: preservingDescriptions)
     }
 
     func write(_ data: Data) {
@@ -55,6 +58,10 @@ final class WebSocketFrameSink: FrameSink, @unchecked Sendable {
             enqueue(msg)
         }
     }
+
+    /// A message that is already framed (one metadata packet) goes to
+    /// the backlog as it is, bypassing the codec parser.
+    func writeMessage(_ data: Data) { enqueue(data) }
 
     /// Drops whatever is queued and refuses further frames; the drain
     /// task, if one is running, stops at its next read.

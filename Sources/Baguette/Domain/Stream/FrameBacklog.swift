@@ -17,6 +17,10 @@ import Foundation
 /// Frames arrive here already stripped of their transport envelope, so
 /// an AVCC frame's first byte is its `AVCCEnvelope` tag. A JPEG starts
 /// `FFD8`, which is no tag value, so MJPEG frames are all discardable.
+/// A metadata packet (`frameMetadata=1`) starts with a length prefix
+/// whose first byte is usually zero — the description tag's value — so
+/// such a backlog turns description detection off and drops whole
+/// packets instead.
 struct FrameBacklog {
     /// The most bytes the backlog will hold before it starts discarding.
     /// Deep buffering is actively harmful on a live stream — it buys
@@ -29,6 +33,7 @@ struct FrameBacklog {
     static let referenceByteBudget = 32 * 1024 * 1024
 
     let byteBudget: Int
+    private let preservingDescriptions: Bool
     private let rejectingOverflow: Bool
     private var frames: [Data] = []
     private(set) var byteCount = 0
@@ -36,16 +41,20 @@ struct FrameBacklog {
     /// caller can tell a viewer the stream skipped rather than stalled.
     private(set) var droppedCount = 0
 
-    init(byteBudget: Int = FrameBacklog.defaultByteBudget, rejectingOverflow: Bool = false) {
+    init(
+        byteBudget: Int = FrameBacklog.defaultByteBudget, preservingDescriptions: Bool = true,
+        rejectingOverflow: Bool = false
+    ) {
         self.byteBudget = byteBudget
+        self.preservingDescriptions = preservingDescriptions
         self.rejectingOverflow = rejectingOverflow
     }
 
     /// The policy a format needs: MJPEG discards, AVCC rejects overflow.
-    init(format: StreamFormat) {
+    init(format: StreamFormat, preservingDescriptions: Bool = true) {
         self.init(
             byteBudget: format == .avcc ? Self.referenceByteBudget : Self.defaultByteBudget,
-            rejectingOverflow: format == .avcc)
+            preservingDescriptions: preservingDescriptions, rejectingOverflow: format == .avcc)
     }
 
     var count: Int { frames.count }
@@ -85,7 +94,7 @@ struct FrameBacklog {
     /// first thing trimming takes.
     private mutating func trim() {
         guard byteCount > byteBudget else { return }
-        var retained = frames.lastIndex(where: Self.isDescription)
+        var retained = preservingDescriptions ? frames.lastIndex(where: Self.isDescription) : nil
         var index = 0
         while byteCount > byteBudget, frames.count > 1, index < frames.count - 1 {
             if index == retained {

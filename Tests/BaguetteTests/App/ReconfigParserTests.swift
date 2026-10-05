@@ -64,4 +64,12 @@ struct ReconfigParserTests {
         )
         #expect(same == .default)
     }
+
+    @Test func `stream controls are recognised apart from gestures`() {
+        for kind in ["set_bitrate", "set_fps", "set_scale", "force_idr", "snapshot"] {
+            #expect(ReconfigParser.isStreamControl(#"{"type":"\#(kind)"}"#))
+        }
+        #expect(!ReconfigParser.isStreamControl(#"{"type":"down","x":1,"y":2}"#))
+        #expect(!ReconfigParser.isStreamControl("not json"))
+    }
 }
