@@ -10,6 +10,10 @@ For releases prior to this changelog, see the
 
 ## [Unreleased]
 
+---
+
+## [0.2.3] - 2026-10-05
+
 ### Added
 - `list --json` and `/simulators.json` expose the installed device type, product family and runtime identity next to the editable name, so clients can filter and match devices after a rename. → [docs](docs/features/device-farm/README.md#catalog-identity)
 - `input --require-existing-display` and `stream?requireExistingDisplay=1` fail when the requested CarPlay display is not attached, instead of enabling the host External Displays panel on the caller's behalf. → [docs](docs/features/companion-screens/README.md)
@@ -82,7 +86,8 @@ For releases prior to this changelog, see the
 
 [0.1](docs/changelog/0.1.md)
 
-[Unreleased]: https://github.com/tddworks/baguette/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/tddworks/baguette/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/tddworks/baguette/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/tddworks/baguette/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/tddworks/baguette/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/tddworks/baguette/compare/v0.1.99...v0.2.0
