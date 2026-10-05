@@ -60,23 +60,51 @@ AXP invokes the delegate via ObjC dispatch.
 ### Per-call dance
 
 ```
-1. Token = UUID().uuidString
-2. dispatcher.register(device: simDevice, token, deadline)
-3. translation = translator.frontmostApplicationWithDisplayId:0
-                                          bridgeDelegateToken:token
-4. translation.bridgeDelegateToken = token   ← critical, see below
-5. root = translator.macPlatformElementFromTranslation:translation
-6. root.translation.bridgeDelegateToken = token
-7. walk root.accessibilityChildren, stamping the token onto each
+1. simctl [--set path] spawn UDID HingeControl frontmost → live PID
+2. translation = SimDevice.sendAccessibilityRequestAsync(
+                     requestType: 1, parameters: {pid})
+3. Token = UUID().uuidString
+4. dispatcher.register(device: simDevice, token, deadline)
+5. translation.bridgeDelegateToken = token   ← critical, see below
+6. root = translator.macPlatformElementFromTranslation:translation
+7. root.translation.bridgeDelegateToken = token
+8. walk root.accessibilityChildren, stamping the token onto each
    child's `translation` sub-property
-8. dispatcher.unregister(token)
+9. dispatcher.unregister(token)
 ```
 
-Step 4 is the single most important thing. The translator stores
+Step 5 is the single most important thing. The translator stores
 the token internally, but it re-reads `bridgeDelegateToken` from
 **every translation object** it touches — if a child object was
 returned by AXP without our token stamped on it, the next sub-XPC
 silently fails.
+
+### Fresh guest frontmost discovery
+
+On iOS 26.5 the CoreSimulatorBridge frontmost request
+(`-frontmostApplicationWithDisplayId:bridgeDelegateToken:`) can return an
+empty `AXPTranslatorResponse` even while its application-by-PID requests
+work, and `describe-ui` answered `null` for a visibly running app. Each
+query therefore asks the guest window server for the current frontmost PID
+in a fresh `HingeControl frontmost` process: inside the guest, the AX
+translator routes requests to its own `processTranslatorRequest:`, and no
+HID framework is loaded or input service registered. The implementation
+follows [idb's guest runtime](https://github.com/facebook/idb/blob/1c5c81f6cbe3a31986eda66349fd22a2f9b47858/SimulatorFrameworkBridge/Runtime/AccessibilityRuntime.m#L831)
+and ships its MIT notice (`LICENSE.idb`) next to the helper.
+
+The guest exits within four seconds of reaching `main`, on an independent
+watchdog. Its main queue stays live while the query runs off-main: blocking
+main delays `_enableAccessibilityBridgeRuntime` callbacks by three seconds on
+iOS 26.5. The host allows ten seconds for `simctl` startup, the guest query,
+exit and pipe drain; other `simctl` queries keep their five-second budget.
+The host reads stdout and stderr separately and decodes only the final
+stdout line, which the helper starts with a newline so an injected dylib's
+partial diagnostics cannot run into it. An invalid final line fails the
+query; an earlier PID is never reused, and there is no cached-PID path.
+The application lookup goes to the selected SimDevice directly because the
+host translator's PID convenience method sends an empty bridge token, which
+cannot tell concurrent devices apart. The tree's deadline starts after
+discovery completes.
 
 ## Coordinates
 

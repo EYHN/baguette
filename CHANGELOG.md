@@ -23,6 +23,7 @@ For releases prior to this changelog, see the
 - `DELETE /simulators/:udid/motion` parks and disarms after a server restart and after a first publish that wrote the intent before failing, resuming the published pedometer totals; a failed cleanup stays retryable instead of being reported as stopped. → [docs](docs/features/motion/README.md)
 
 ### Fixed
+- `describe-ui` finds the frontmost app with a fresh guest query (`HingeControl frontmost`) and asks the device for it by PID, so an iOS 26.5 simulator whose bridge frontmost request answers empty no longer gets `null`. → [docs](docs/features/accessibility/design.md#fresh-guest-frontmost-discovery)
 - `describe-ui` frames and point queries use native panel (HID) coordinates in all four orientations, and results report the observed `screen` size, orientation and target; missing or changing geometry fails instead of scaling the application root. → [docs](docs/features/accessibility/README.md)
 
 ### Changed
