@@ -194,7 +194,13 @@ private final class TwinScreenView: Screen, @unchecked Sendable {
         self.hub = hub
     }
 
-    func start(onFrame: @escaping @Sendable (IOSurface) -> Void) throws {
+    /// A mirrored phone carries no SimulatorKit screen properties, so the
+    /// view never reports metadata; consumers keep whatever orientation
+    /// they assume for an unknown display.
+    func start(
+        onFrame: @escaping @Sendable (IOSurface) -> Void,
+        onMetadata: @escaping @Sendable (ScreenMetadata) -> Void
+    ) throws {
         hub?.attach(id: id, onFrame: onFrame)
     }
 

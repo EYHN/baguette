@@ -20,8 +20,12 @@ protocol DeviceScene: AnyObject, Sendable {
     func renderFrame(screen: IOSurface) throws -> DeviceFrame
     func renderFrame(screens: FoldableScreens) throws -> DeviceFrame
 
-    /// A foldable: pose the book at this hinge angle (`FoldPose`).
-    func update(hingeDegrees: Double)
+    /// A foldable: pose the book at this hinge angle (`FoldPose`), with
+    /// `litPanel` the panel the device is presenting on. The two are
+    /// independent facts — the angle is the hinge's reading, the lit
+    /// panel Core Device's — and the angle alone does not imply the
+    /// panel (see `Simulator.litPanel()`).
+    func update(hingeDegrees: Double, litPanel: IntegratedPanel)
 
     /// Mutate camera state without reloading the model or reconnecting.
     func update(camera: Device3DCamera)
@@ -46,6 +50,6 @@ protocol DeviceScene: AnyObject, Sendable {
     /// for a model whose definition names them; nil otherwise.
     var screenButtons: [ScreenButtonMark]? { get }
 
-    /// A foldable's lit panel at the current hinge angle; nil on a phone.
+    /// A foldable's lit panel as last posed; nil on a phone.
     var litPanel: IntegratedPanel? { get }
 }

@@ -45,6 +45,10 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private var screenLocalCorners: ScreenLocalCorners!
     private var coverLocalCorners: ScreenLocalCorners?
     private var hingeDegrees: Double = 180
+    /// The panel the device presents on, as last posed. Core Device's
+    /// word, handed in with the angle; a scene starts open on the
+    /// unfolded panel until it is posed.
+    private var posedLitPanel: IntegratedPanel = .secondary
     private var view = Device3DCamera(rotation: .zero, zoom: 1)
     /// The interface orientation the page last asked the guest for; nil
     /// means the usual: the unfolded panel landscape-left, the cover
@@ -57,7 +61,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private var bodyExtents = Vector3(x: 0, y: 0, z: 0)
     private(set) var screenButtons: [ScreenButtonMark]?
     var litPanel: IntegratedPanel? {
-        plan.model.definition.scene.fold == nil ? nil : HingeAngle(degrees: hingeDegrees).litPanel
+        plan.model.definition.scene.fold == nil ? nil : posedLitPanel
     }
     private var renderTargets: MetalRenderTargetRing!
     private var metalDevice: (any MTLDevice)!
@@ -138,11 +142,14 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     }
 
     /// Pose the book: the shutting clip at the angle's time, the whole
-    /// device turned back to centre the bend (`FoldPose`).
-    func update(hingeDegrees: Double) {
+    /// device turned back to centre the bend (`FoldPose`), and the lit
+    /// panel deciding which way the book stands and which screen the
+    /// tap space projects.
+    func update(hingeDegrees: Double, litPanel: IntegratedPanel) {
         Self.onMain {
             guard let fold = self.plan.model.definition.scene.fold,
                   let controller = self.foldController else { return }
+            self.posedLitPanel = litPanel
             let pose = FoldPose.at(degrees: hingeDegrees, fold: fold)
             controller.time = pose.clipTime
             controller.pause()
@@ -218,7 +225,7 @@ final class RealityKitDeviceScene: DeviceScene, @unchecked Sendable {
     private func projectedScreenPieces() -> [ScreenPiece]? {
         guard let fold = plan.model.definition.scene.fold,
               let coverLocalCorners else { return nil }
-        let lit = HingeAngle(degrees: hingeDegrees).litPanel
+        let lit = posedLitPanel
         return FoldedScreenProjection.pieces(
             inner: screenLocalCorners,
             cover: coverLocalCorners,

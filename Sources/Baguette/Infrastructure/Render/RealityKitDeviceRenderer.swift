@@ -14,7 +14,9 @@ struct RealityKitDeviceRenderer: DeviceRenderer, Sendable {
 
     func render(plan: DeviceRenderPlan, screenImage: Data) throws -> Data {
         let scene = try RealityKitDeviceScene(plan: plan, assets: assets)
-        if let hingeDegrees = plan.hingeDegrees { scene.update(hingeDegrees: hingeDegrees) }
+        if let hingeDegrees = plan.hingeDegrees, let panel = plan.screenPanel {
+            scene.update(hingeDegrees: hingeDegrees, litPanel: panel)
+        }
         guard let source = CGImageSourceCreateWithData(screenImage as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
               let surface = Self.surface(from: image, rotation: plan.screenRotation) else {
@@ -63,7 +65,8 @@ struct RealityKitDeviceRenderer: DeviceRenderer, Sendable {
         return surface
     }
 
-    private static func png(from surface: IOSurface) throws -> Data {
+    /// A rendered BGRA surface as PNG bytes; shared with `Device3DSnapshots`.
+    static func png(from surface: IOSurface) throws -> Data {
         IOSurfaceLock(surface, .readOnly, nil)
         defer { IOSurfaceUnlock(surface, .readOnly, nil) }
         guard let context = CGContext(

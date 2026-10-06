@@ -10,7 +10,7 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
     /// A foldable's hardware keys, when the guest tool is there to
     /// press them; see `FoldableInput`.
     private let keys: (any DeviceKeys)?
-    /// When set, the lit panel is this one and the hinge is not asked —
+    /// When set, the lit panel is this one and Core Device is not asked —
     /// see `Displays.panel(_:)`.
     private let pinnedPanel: IntegratedPanel?
     private let lock = NSLock()
@@ -34,9 +34,10 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
         self.pinnedPanel = pinnedPanel
     }
 
-    /// Binds the plane. On a foldable this also asks the hinge which
-    /// panel is lit (~0.3 s through devicectl); a single-panel device
-    /// never pays that, since it has nothing to choose between.
+    /// Binds the plane. On a foldable this also asks which panel is lit
+    /// — Core Device's answer through `ActiveDisplays`, cached and kept
+    /// current by the hinge's monitor; a single-panel device never pays
+    /// that, since it has nothing to choose between.
     func resolve() throws -> DisplayBinding {
         let sized = try SimulatorKitFramebufferPorts.sizedPorts(udid: udid, host: host)
         let screens = SimctlIOEnumerate.connectedScreens(from: try enumerateIO())
@@ -45,7 +46,9 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
             screens: screens
         )
         let litPanel: IntegratedPanel = pinnedPanel
-            ?? (IntegratedPanels.several(in: sized) ? (hinge.angle()?.litPanel ?? .primary) : .primary)
+            ?? (IntegratedPanels.several(in: sized)
+                ? (ActiveDisplays.shared.litPanel(udid: udid, device: host.resolveDevice(udid: udid)) ?? .primary)
+                : .primary)
         let binding = try ConnectedScreens.binding(kind: kind, ports: ports, litPanel: litPanel)
         lock.lock()
         cached = binding
@@ -55,9 +58,9 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
 
     /// The panel an observation is read from, as a binding plus the
     /// `AXScreen` that describes it. Reads the connected screens afresh
-    /// and, on a foldable, samples the guest hinge directly: a shared
-    /// hinge watch can hold a stale value, and an observation that
-    /// names the wrong panel would send input to the dark one.
+    /// and, on a foldable, takes the lit panel from Core Device through
+    /// `ActiveDisplays` — the one authority on it; the hinge angle does
+    /// not say which panel the pose provider lit.
     private func observedBinding() throws -> (binding: DisplayBinding, screen: AXScreen, multiplePanels: Bool) {
         guard kind == .phone, pinnedPanel == nil,
             let device = host.resolveDevice(udid: udid)
@@ -65,8 +68,8 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
         let ports = try SimulatorKitFramebufferPorts.sizedPorts(udid: udid, host: host)
         let screens = SimctlIOEnumerate.connectedScreens(from: try enumerateIO())
         let multiple = screens.filter { $0.screenType == .integrated }.count > 1
-        let angle = multiple ? DevicectlHinge(udid: udid).angle() : nil
-        let observed = try ConnectedScreens.observedPhone(ports: ports, screens: screens, angle: angle)
+        let litPanel = multiple ? ActiveDisplays.shared.litPanel(udid: udid, device: device) : nil
+        let observed = try ConnectedScreens.observedPhone(ports: ports, screens: screens, litPanel: litPanel)
         let binding = observed.binding
         guard let points = binding.pointSize(scale: observed.scale) else {
             throw ObservedScreenError.unavailable
@@ -82,7 +85,21 @@ final class SimulatorKitDisplay: Display, @unchecked Sendable {
         )
     }
 
-    func observedScreen() throws -> AXScreen { try observedBinding().screen }
+    func observedScreen() throws -> AXScreen {
+        // A single-panel device's screen cannot change identity, so its
+        // live screen properties answer without a `simctl io enumerate`
+        // round-trip — accessibility reads the geometry before and after
+        // every query, and selector polling repeats queries.
+        if kind == .phone, pinnedPanel == nil, let device = host.resolveDevice(udid: udid) {
+            let panels = ActiveDisplays.panels(of: device).panels
+            if panels.count == 1, let only = panels.first,
+               let screen = try? SimulatorKitScreenOrientation.readScreen(
+                   device: device, screenID: only.screenID, panel: .primary) {
+                return screen
+            }
+        }
+        return try observedBinding().screen
+    }
 
     /// Input pinned to the screen `expected` describes. The binding is
     /// resolved once and never re-derived for a contact that is already

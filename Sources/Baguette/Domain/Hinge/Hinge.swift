@@ -22,12 +22,27 @@ protocol Hinge: Sendable {
     /// sweep at 60 Hz (0° closed, 130° its open pose, 180° flat), and
     /// this is how a page draws the fold at the angle the device is
     /// actually at. A device without a hinge delivers nothing.
-    func watch(onAngle: @escaping @Sendable (HingeAngle) -> Void) -> any HingeWatch
+    ///
+    /// `onEnd` runs once if the watch stops on its own — the monitor
+    /// behind it exited, was killed, or ran out its timeout — and never
+    /// after `cancel`. A watch that ends this way delivers no more
+    /// samples; whoever needs the stream to go on starts another.
+    func watch(
+        onAngle: @escaping @Sendable (HingeAngle) -> Void,
+        onEnd: @escaping @Sendable () -> Void
+    ) -> any HingeWatch
 
     /// Move the hinge to `degrees` over `duration` seconds — Device Hub's
     /// pose picker, from baguette. Throws when the device cannot be
     /// driven (no `HingeControl`, or the guest refused).
     func fold(to degrees: Double, over duration: TimeInterval) throws
+}
+
+extension Hinge {
+    /// A watch whose end nobody needs to hear about.
+    func watch(onAngle: @escaping @Sendable (HingeAngle) -> Void) -> any HingeWatch {
+        watch(onAngle: onAngle, onEnd: {})
+    }
 }
 
 /// A running watch on a hinge; `cancel` stops the samples.

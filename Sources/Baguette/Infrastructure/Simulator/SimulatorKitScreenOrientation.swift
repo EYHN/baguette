@@ -13,6 +13,15 @@ enum SimulatorKitScreenOrientation {
     }
 
     private static func properties(device: NSObject, screenID: UInt32) throws -> NSObject {
+        // The framebuffer port's own snapshot first: it is safe off the
+        // main thread, which `SimDeviceScreen` is not in a library host.
+        if let properties = SimulatorKitFramebufferPorts.screenProperties(device: device, screenID: screenID) {
+            return properties
+        }
+        return try screenProperties(device: device, screenID: screenID)
+    }
+
+    private static func screenProperties(device: NSObject, screenID: UInt32) throws -> NSObject {
         let allocSelector = NSSelectorFromString("alloc")
         let initSelector = NSSelectorFromString("initWithDevice:screenID:")
         guard let cls = NSClassFromString("SimulatorKit.SimDeviceScreen"),

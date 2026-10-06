@@ -108,8 +108,36 @@ final class CoreSimulator: Simulator, @unchecked Sendable {
 
     /// One monitor per device: sockets share a watch and binds read the
     /// last sample while it runs. See `SharedHinge`.
+    ///
+    /// A foldable's monitor is kept running from the first time anyone
+    /// asks: its angle is state this process always holds — for the 3D
+    /// pose, for `ActiveDisplays` to know when to ask Core Device which
+    /// panel lit — and never a spawn away. A phone has no hinge and
+    /// is not followed.
+    /// Whether this device type folds. A phone has one built-in display;
+    /// a foldable (iPhone Duo) has two, and is the only kind whose hinge
+    /// is worth a standing monitor.
+    var folds: Bool {
+        ActiveDisplays.panels(of: host.resolveDevice(udid: udid)).isFoldable
+    }
+
     func hinge() -> any Hinge {
-        SharedHinge.forDevice(udid, make: { DevicectlHinge(udid: udid) }, motor: GuestHingeMotor.forDevice(udid, deviceSetPath: deviceSetPath))
+        let shared = SharedHinge.forDevice(
+            udid, make: { DevicectlHinge(udid: udid) },
+            motor: GuestHingeMotor.forDevice(udid, deviceSetPath: deviceSetPath)
+        )
+        if state == .booted, ActiveDisplays.panels(of: host.resolveDevice(udid: udid)).isFoldable {
+            shared.keepWatching()
+        }
+        return shared
+    }
+
+    /// Core Device's answer, kept current by `ActiveDisplays`. Asking
+    /// the hinge first keeps its monitor running, which is what tells
+    /// `ActiveDisplays` when to look again.
+    func litPanel() -> IntegratedPanel? {
+        _ = hinge()
+        return ActiveDisplays.shared.litPanel(udid: udid, device: host.resolveDevice(udid: udid))
     }
 
     func externalDisplays() -> any ExternalDisplays {

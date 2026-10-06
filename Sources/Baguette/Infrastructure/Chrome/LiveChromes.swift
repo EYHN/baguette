@@ -3,9 +3,10 @@ import Foundation
 /// Production `Chromes` — composes a filesystem `ChromeStore` and a
 /// `PDFRasterizer` to turn a `Simulator` into a `DeviceChromeAssets`.
 ///
-/// Caches by `chromeIdentifier`, not by simulator UDID — many
-/// simulators share the same chrome bundle (every iPhone 17 variant
-/// uses `phone11`), and the rasterized PNG isn't device-specific.
+/// Caches by `chromeIdentifier` and logical screen size, not by
+/// simulator UDID. DeviceKit reuses one chrome bundle across devices
+/// with different displays, so the exact-size 9-slice composition is
+/// specific to that pair.
 /// The plist read still happens per call because that's what tells
 /// us *which* bundle to look up; it's a few hundred bytes off SSD
 /// and not the bottleneck.
@@ -15,13 +16,39 @@ import Foundation
 /// surface "no bezel for this device". Reasoning lives in stderr
 /// logs (the system already routes those).
 final class LiveChromes: Chromes, @unchecked Sendable {
+    private struct CacheKey: Hashable {
+        let chromeIdentifier: String
+        let screenWidth: UInt64?
+        let screenHeight: UInt64?
+        let framebufferMaskIdentifier: String?
+
+        init(chromeIdentifier: String, screenSize: Size?, framebufferMaskIdentifier: String?) {
+            self.chromeIdentifier = chromeIdentifier
+            screenWidth = screenSize?.width.bitPattern
+            screenHeight = screenSize?.height.bitPattern
+            self.framebufferMaskIdentifier = framebufferMaskIdentifier
+        }
+    }
+
+    private enum CacheEntry {
+        case available(DeviceChromeAssets)
+        case unavailable
+
+        var assets: DeviceChromeAssets? {
+            switch self {
+            case .available(let assets): assets
+            case .unavailable: nil
+            }
+        }
+    }
+
     private let store: any ChromeStore
     private let rasterizer: any PDFRasterizer
 
     private let lock = NSLock()
-    /// Guarded by `lock`. Bundles without a composite cache `nil`
-    /// so we don't re-read their chrome.json on every call.
-    private var cache: [String: DeviceChromeAssets?] = [:]
+    /// Guarded by `lock`. Unavailable assets are cached too, so a
+    /// frameless device does not repeatedly parse the same bundle.
+    private var cache: [CacheKey: CacheEntry] = [:]
 
     init(store: any ChromeStore, rasterizer: any PDFRasterizer) {
         self.store = store
@@ -40,23 +67,44 @@ final class LiveChromes: Chromes, @unchecked Sendable {
         guard let profile = resolveProfile(deviceName: deviceName)?.panel(panel) else {
             return nil
         }
-        let chromeID = profile.chromeIdentifier
-        // The mask is the panel's, not the chrome's — two panels could
-        // share a bundle and differ in shape — so it is part of the key.
-        let key = chromeID + (profile.framebufferMaskIdentifier.map { "|" + $0 } ?? "")
+        return assets(
+            chromeIdentifier: profile.chromeIdentifier,
+            screenSize: profile.screenSize,
+            framebufferMaskIdentifier: profile.framebufferMaskIdentifier
+        )
+    }
+
+    /// Resolve a chrome by identifier for a caller that already holds
+    /// the device's profile — `LiveDevicePresentations` reads its own,
+    /// so the plist is not parsed twice. The screen size is part of the
+    /// key because the 9-slice composition is exact to it; the mask is
+    /// the panel's, not the chrome's — two panels could share a bundle
+    /// and differ in shape — so it is part of the key too.
+    func assets(
+        chromeIdentifier: String,
+        screenSize: Size?,
+        framebufferMaskIdentifier: String? = nil
+    ) -> DeviceChromeAssets? {
+        let cacheKey = CacheKey(
+            chromeIdentifier: chromeIdentifier,
+            screenSize: screenSize,
+            framebufferMaskIdentifier: framebufferMaskIdentifier
+        )
 
         lock.lock()
-        if let cached = cache[key] {
+        if let cached = cache[cacheKey] {
             lock.unlock()
-            return cached
+            return cached.assets
         }
         lock.unlock()
 
-        let resolved = loadAssets(chromeIdentifier: chromeID, profile: profile)
-            .map { $0.withScreenMask(screenMask(for: profile)) }
+        let resolved = loadAssets(
+            chromeIdentifier: chromeIdentifier,
+            screenSize: screenSize
+        ).map { $0.withScreenMask(screenMask(identifier: framebufferMaskIdentifier)) }
 
         lock.lock()
-        cache[key] = resolved
+        cache[cacheKey] = resolved.map(CacheEntry.available) ?? .unavailable
         lock.unlock()
         return resolved
     }
@@ -64,8 +112,8 @@ final class LiveChromes: Chromes, @unchecked Sendable {
     /// The panel's framebuffer mask, rasterized; `nil` when the profile
     /// names none or the file will not read — the bezel does not depend
     /// on it.
-    private func screenMask(for profile: DeviceProfile.PanelProfile) -> ChromeImage? {
-        guard let id = profile.framebufferMaskIdentifier,
+    private func screenMask(identifier: String?) -> ChromeImage? {
+        guard let id = identifier,
               let pdf = try? store.framebufferMaskPDF(identifier: id)
         else { return nil }
         return try? rasterizer.rasterize(pdfData: pdf)
@@ -91,7 +139,7 @@ final class LiveChromes: Chromes, @unchecked Sendable {
 
     private func loadAssets(
         chromeIdentifier: String,
-        profile: DeviceProfile.PanelProfile
+        screenSize: Size?
     ) -> DeviceChromeAssets? {
         let chrome: DeviceChrome
         do {
@@ -100,13 +148,20 @@ final class LiveChromes: Chromes, @unchecked Sendable {
         } catch {
             return nil
         }
-        guard let composite = loadComposite(
+        guard let body = loadComposite(
             chromeIdentifier: chromeIdentifier,
             chrome: chrome,
-            profile: profile
+            screenSize: screenSize
         ) else {
             // Neither baked-composite nor a complete 9-slice (with a
             // valid screen size) — cache nil so we don't keep re-parsing.
+            return nil
+        }
+        guard let composite = appendStandIfPresent(
+            chromeIdentifier: chromeIdentifier,
+            chrome: chrome,
+            body: body
+        ) else {
             return nil
         }
         do {
@@ -120,19 +175,28 @@ final class LiveChromes: Chromes, @unchecked Sendable {
         }
     }
 
-    /// Resolve a `DeviceChrome` to a single bezel image. Prefers the
-    /// pre-baked composite when the bundle ships one (every iPhone
-    /// `phoneN ≤ 12`); falls through to 9-slice composition for
-    /// bundles that ship only corner / edge pieces (every iPad
-    /// `tabletN`, plus `phone13` for iPhone 17e). The 9-slice path
-    /// needs the simulator's screen size to size its inner canvas —
-    /// `Screen.pdf` is a 1×1 marker, so we read the dimensions from
-    /// `mainScreen{Width,Height,Scale}` on the device's plist instead.
+    /// Resolve a `DeviceChrome` to a single bezel image. Prefer the
+    /// exact-size 9-slice whenever DeviceKit ships one and the screen
+    /// size is known; a baked composite is only a fallback. The same
+    /// bundle identifier may serve different display sizes, while its
+    /// baked image represents only one of them.
     private func loadComposite(
         chromeIdentifier: String,
         chrome: DeviceChrome,
-        profile: DeviceProfile.PanelProfile
+        screenSize: Size?
     ) -> ChromeImage? {
+        if let slice = chrome.slice,
+           let innerSize = screenSize,
+           let pdfs = loadSlicePDFs(
+               chromeIdentifier: chromeIdentifier, slice: slice
+           ),
+           let composite = try? rasterizer.compose9Slice(
+               pdfs: pdfs,
+               insets: chrome.screenInsets,
+               innerSize: innerSize
+           ) {
+            return composite
+        }
         if let imageName = chrome.compositeImageName,
            let pdf = try? store.chromeAssetPDF(
                chromeIdentifier: chromeIdentifier, imageName: imageName
@@ -140,16 +204,61 @@ final class LiveChromes: Chromes, @unchecked Sendable {
            let composite = try? rasterizer.rasterize(pdfData: pdf) {
             return composite
         }
-        guard let slice = chrome.slice,
-              let innerSize = profile.screenSize,
-              let pdfs = loadSlicePDFs(
-                  chromeIdentifier: chromeIdentifier, slice: slice
-              ) else {
+        return nil
+    }
+
+    private func appendStandIfPresent(
+        chromeIdentifier: String,
+        chrome: DeviceChrome,
+        body: ChromeImage
+    ) -> ChromeImage? {
+        guard let stand = chrome.stand else {
+            return body
+        }
+        do {
+            let standImage = try rasterizer.composeHorizontalSlice(
+                pdfs: HorizontalSlicePDFs(
+                    left: try store.chromeAssetPDF(
+                        chromeIdentifier: chromeIdentifier,
+                        imageName: stand.left
+                    ),
+                    center: try store.chromeAssetPDF(
+                        chromeIdentifier: chromeIdentifier,
+                        imageName: stand.center
+                    ),
+                    right: try store.chromeAssetPDF(
+                        chromeIdentifier: chromeIdentifier,
+                        imageName: stand.right
+                    )
+                ),
+                size: Size(width: stand.width, height: stand.height)
+            )
+            let canvas = Size(
+                width: max(body.size.width, standImage.size.width),
+                height: body.size.height + standImage.size.height
+            )
+            return try rasterizer.compose(
+                canvasSize: canvas,
+                layers: [
+                    ImageLayer(
+                        image: body,
+                        topLeft: Point(
+                            x: (canvas.width - body.size.width) / 2,
+                            y: 0
+                        )
+                    ),
+                    ImageLayer(
+                        image: standImage,
+                        topLeft: Point(
+                            x: (canvas.width - standImage.size.width) / 2,
+                            y: body.size.height
+                        )
+                    ),
+                ]
+            )
+        } catch {
             return nil
         }
-        return try? rasterizer.compose9Slice(
-            pdfs: pdfs, insets: chrome.screenInsets, innerSize: innerSize
-        )
     }
 
     /// Read all nine PDF assets in one go. Any single missing piece
@@ -372,6 +481,7 @@ final class LiveChromes: Chromes, @unchecked Sendable {
             let leftX: Double
             switch button.align {
             case .trailing: leftX = compX + compositeSize.width + restX - imageSize.width
+            case .center:   leftX = compX + (compositeSize.width - imageSize.width) / 2 + restX
             case .leading:  leftX = compX + restX
             }
             let topY = compY + restY - imageSize.height
@@ -386,6 +496,7 @@ final class LiveChromes: Chromes, @unchecked Sendable {
             let leftX: Double
             switch button.align {
             case .trailing: leftX = compX + compositeSize.width + restX - imageSize.width
+            case .center:   leftX = compX + (compositeSize.width - imageSize.width) / 2 + restX
             case .leading:  leftX = compX + restX
             }
             let topY = compY + compositeSize.height + restY

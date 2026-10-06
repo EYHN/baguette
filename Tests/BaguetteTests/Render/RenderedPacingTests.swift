@@ -12,7 +12,7 @@ struct RenderedPacingTests {
         let scene = MockDeviceScene()
         var receive: (@Sendable (IOSurface) -> Void)?
         let samples = RenderSamples()
-        given(source).start(onFrame: .any).willProduce { receive = $0 }
+        given(source).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in receive = onFrame }
         given(source).stop().willReturn()
         given(scene).renderFrame(screen: .any).willProduce { surface in samples.render(surface) }
         let screen = RenderedScreen(source: source, scene: scene, fps: 20)
@@ -42,18 +42,18 @@ struct RenderedPacingTests {
         var receiveInner: (@Sendable (IOSurface) -> Void)?
         var receiveCover: (@Sendable (IOSurface) -> Void)?
         let samples = RenderSamples()
-        given(inner).start(onFrame: .any).willProduce { receiveInner = $0 }
-        given(cover).start(onFrame: .any).willProduce { receiveCover = $0 }
+        given(inner).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in receiveInner = onFrame }
+        given(cover).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in receiveCover = onFrame }
         given(inner).stop().willReturn()
         given(cover).stop().willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 180))
-        given(hinge).watch(onAngle: .any).willReturn(watch)
+        given(hinge).watch(onAngle: .any, onEnd: .any).willReturn(watch)
         given(watch).cancel().willReturn()
-        given(scene).update(hingeDegrees: .any).willReturn()
+        given(scene).update(hingeDegrees: .any, litPanel: .any).willReturn()
         given(scene).renderFrame(screens: .any).willProduce { screens in
             samples.render(try #require(screens.unfolded ?? screens.cover))
         }
-        let screen = RenderedFoldable(unfolded: inner, cover: cover, hinge: hinge, scene: scene, fps: 20)
+        let screen = RenderedFoldable(unfolded: inner, cover: cover, hinge: hinge, litPanel: { .primary }, scene: scene, fps: 20)
         try screen.startFrames { samples.deliver($0) }
         defer { screen.stop() }
         for index in 2...21 {
@@ -77,7 +77,7 @@ struct RenderedPacingTests {
         let finished = DispatchSemaphore(value: 0)
         var receive: (@Sendable (IOSurface) -> Void)?
         let samples = RenderSamples()
-        given(source).start(onFrame: .any).willProduce { receive = $0 }
+        given(source).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in receive = onFrame }
         given(source).stop().willReturn()
         given(scene).renderFrame(screen: .any).willProduce { surface in
             started.signal()

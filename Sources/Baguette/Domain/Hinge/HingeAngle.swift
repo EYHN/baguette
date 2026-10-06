@@ -6,25 +6,17 @@ import Foundation
 /// The angle is the simulator runtime's: Device Hub streams hinge
 /// samples into the guest as HID reports, CoreMotion delivers them to
 /// SpringBoard, and SpringBoard's pose provider decides which panel to
-/// light. baguette does not decide the pose; it reads the angle and
-/// follows it, because the framebuffer it binds and the digitizer it
-/// addresses both depend on the lit panel.
+/// light. baguette does not decide the pose; it reads the angle to
+/// draw the fold at the angle the device is actually at.
+///
+/// The angle says nothing about which panel is lit. The pose provider
+/// decides from angle, speed and history — the same 30° has been seen
+/// with the cover lit and with the unfolded panel lit, depending on
+/// which way the hinge was moving — and an app may light the cover
+/// while the device is open. Core Device is the one authority on that
+/// (`Simulator.litPanel()`, through `ActiveDisplays`).
 struct HingeAngle: Equatable, Sendable {
     let degrees: Double
-
-    /// Where SpringBoard hands the display over to the unfolded panel.
-    ///
-    /// Measured on iPhone Duo / iOS 27.1 with the runtime's own
-    /// transition rules: sweeping to 60° left the cover lit, sweeping to
-    /// 90° lit the unfolded panel, and the pose provider's regions
-    /// (`closed` / `partiallyOpen` / `openFlat`) begin the partially-open
-    /// band there. Device Hub's poses land well clear of it on either
-    /// side (closed ≈ 3°, open ≈ 130–180°).
-    static let openBoundaryDegrees: Double = 90
-
-    var litPanel: IntegratedPanel {
-        degrees >= Self.openBoundaryDegrees ? .secondary : .primary
-    }
 
     /// One line of `xcrun devicectl device motion hinge-angle` output:
     ///

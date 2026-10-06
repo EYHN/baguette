@@ -133,6 +133,33 @@ struct CoreGraphicsPDFRasterizerTests {
         #expect(pixels.alpha(x: 130, y: 130) < 32, "inner area must remain transparent for screen overlay")
     }
 
+    @Test func `compose9Slice preserves every piece's own native thickness and corner size`() throws {
+        let rast = CoreGraphicsPDFRasterizer()
+        let merged = try rast.compose9Slice(
+            pdfs: NineSlicePDFs(
+                topLeft: try makePDF(width: 10, height: 10),
+                top: try makePDF(width: 2, height: 18),
+                topRight: try makePDF(width: 30, height: 20),
+                right: try makePDF(width: 17, height: 2),
+                bottomRight: try makePDF(width: 40, height: 25),
+                bottom: try makePDF(width: 2, height: 16),
+                bottomLeft: try makePDF(width: 20, height: 30),
+                left: try makePDF(width: 14, height: 2)
+            ),
+            insets: Insets(top: 20, left: 20, bottom: 20, right: 20),
+            innerSize: Size(width: 100, height: 100)
+        )
+        let pixels = try Self.alphaPlane(merged)
+
+        #expect(pixels.alpha(x: 115, y: 15) > 200, "top-right must keep its 30×20 native size")
+        #expect(pixels.alpha(x: 105, y: 120) > 200, "bottom-right must keep its 40×25 native size")
+        #expect(pixels.alpha(x: 15, y: 115) > 200, "bottom-left must keep its 20×30 native size")
+        #expect(pixels.alpha(x: 70, y: 15) > 200, "top must keep its own 18-point thickness")
+        #expect(pixels.alpha(x: 70, y: 125) > 200, "bottom must keep its own 16-point thickness")
+        #expect(pixels.alpha(x: 12, y: 70) > 200, "left must keep its own 14-point thickness")
+        #expect(pixels.alpha(x: 125, y: 70) > 200, "right must keep its own 17-point thickness")
+    }
+
     @Test func `compose9Slice throws when any piece is not a PDF`() throws {
         let rast = CoreGraphicsPDFRasterizer()
         let valid = try makeSquarePDF(side: 10)
@@ -150,6 +177,24 @@ struct CoreGraphicsPDFRasterizerTests {
                 innerSize: Size(width: 100, height: 100)
             )
         }
+    }
+
+    @Test func `composeHorizontalSlice keeps its end caps and stretches its center`() throws {
+        let rast = CoreGraphicsPDFRasterizer()
+        let image = try rast.composeHorizontalSlice(
+            pdfs: HorizontalSlicePDFs(
+                left: try makePDF(width: 9, height: 26),
+                center: try makePDF(width: 1, height: 26),
+                right: try makePDF(width: 9, height: 26)
+            ),
+            size: Size(width: 620, height: 26)
+        )
+        let pixels = try Self.alphaPlane(image)
+
+        #expect(image.size == Size(width: 620, height: 26))
+        #expect(pixels.alpha(x: 4, y: 13) > 200)
+        #expect(pixels.alpha(x: 310, y: 13) > 200)
+        #expect(pixels.alpha(x: 615, y: 13) > 200)
     }
 
     // MARK: - pixel sampling
@@ -188,9 +233,13 @@ struct CoreGraphicsPDFRasterizerTests {
     /// Build a single-page PDF with crop box `side × side` so we can
     /// assert the rasterized PNG comes back at the same dimensions.
     private func makeSquarePDF(side: Double) throws -> Data {
+        try makePDF(width: side, height: side)
+    }
+
+    private func makePDF(width: Double, height: Double) throws -> Data {
         let mutableData = NSMutableData()
         let consumer = CGDataConsumer(data: mutableData)!
-        var box = CGRect(x: 0, y: 0, width: side, height: side)
+        var box = CGRect(x: 0, y: 0, width: width, height: height)
         let ctx = CGContext(consumer: consumer, mediaBox: &box, nil)!
         ctx.beginPDFPage(nil)
         ctx.setFillColor(CGColor(red: 0, green: 0.5, blue: 1, alpha: 1))

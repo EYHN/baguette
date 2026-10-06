@@ -11,9 +11,22 @@ import Foundation
 /// and answers `angle()` from the last sample while it runs; with no
 /// watch running it falls back to a one-shot read.
 ///
+/// The inner watch is not trusted to live: `devicectl` is a child that
+/// can be killed, crash, or run out its timeout, and a monitor that
+/// died silently once left every caller reading the angle it last
+/// heard for the rest of the process. When the inner watch ends while
+/// anyone still subscribes, it is started again — at once after it had
+/// spoken, with a growing pause when it never did (a device that is
+/// shut down, or has no hinge) — and until it is back the angle falls
+/// through to the grace period and a one-shot read, as with no watch.
+///
+/// `keepWatching` is a subscriber that never leaves: a foldable's hinge
+/// is followed for the life of the process, so its angle is always the
+/// last sample and never a spawn away (see `CoreSimulator.hinge()`).
+///
 /// All of the bookkeeping — subscriber fan-out, last sample, start on
-/// first / stop on last — is here and unit-covered against `MockHinge`;
-/// the inner hinge owns the process.
+/// first / stop on last, restart — is here and unit-covered against
+/// `MockHinge`; the inner hinge owns the process.
 final class SharedHinge: Hinge, @unchecked Sendable {
     private let inner: any Hinge
     private let now: () -> Date
@@ -21,6 +34,22 @@ final class SharedHinge: Hinge, @unchecked Sendable {
     private var subscribers: [UUID: @Sendable (HingeAngle) -> Void] = [:]
     private var innerWatch: (any HingeWatch)?
     private var last: (angle: HingeAngle, at: Date)?
+    /// Whether the running inner watch has delivered a sample; decides
+    /// how soon it is restarted when it ends.
+    private var innerSpoke = false
+    /// Consecutive inner watches that ended without a sample.
+    private var silentEnds = 0
+    private var restart: DispatchWorkItem?
+    private var standing: (any HingeWatch)?
+    private let schedule: (TimeInterval, @escaping @Sendable () -> Void) -> DispatchWorkItem
+
+    /// How long to wait before starting the monitor again after it
+    /// ended without a sample: doubling from the first, capped.
+    static let restartDelays: (first: TimeInterval, cap: TimeInterval) = (1, 60)
+
+    static func restartDelay(afterSilentEnds count: Int) -> TimeInterval {
+        min(restartDelays.first * pow(2, Double(max(0, count - 1))), restartDelays.cap)
+    }
 
     /// How long the last sample stays the answer after the watch
     /// stops. A pose change ends with the page reloading — socket and
@@ -32,10 +61,39 @@ final class SharedHinge: Hinge, @unchecked Sendable {
 
     private let motor: (any HingeMotor)?
 
-    init(inner: any Hinge, motor: (any HingeMotor)? = nil, now: @escaping () -> Date = { Date() }) {
+    /// `schedule` runs a restart after a delay; the default is a global
+    /// queue, tests hand in one that runs on demand.
+    init(
+        inner: any Hinge,
+        motor: (any HingeMotor)? = nil,
+        now: @escaping () -> Date = { Date() },
+        schedule: @escaping (TimeInterval, @escaping @Sendable () -> Void) -> DispatchWorkItem = { delay, work in
+            let item = DispatchWorkItem(block: work)
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: item)
+            return item
+        }
+    ) {
         self.inner = inner
         self.motor = motor
         self.now = now
+        self.schedule = schedule
+    }
+
+    /// Follow the hinge for as long as this process lives. Idempotent.
+    func keepWatching() {
+        lock.lock()
+        let already = standing != nil
+        lock.unlock()
+        guard !already else { return }
+        let watch = self.watch { _ in }
+        lock.lock()
+        if standing == nil {
+            standing = watch
+            lock.unlock()
+        } else {
+            lock.unlock()
+            watch.cancel()
+        }
     }
 
     /// A sweep starts where the hinge is — the angle last heard. With
@@ -113,40 +171,130 @@ final class SharedHinge: Hinge, @unchecked Sendable {
         return nil
     }
 
-    func watch(onAngle: @escaping @Sendable (HingeAngle) -> Void) -> any HingeWatch {
+    func watch(
+        onAngle: @escaping @Sendable (HingeAngle) -> Void,
+        onEnd: @escaping @Sendable () -> Void
+    ) -> any HingeWatch {
+        // A shared watch never ends on its subscribers: an inner watch
+        // that stops is started again for as long as they stay.
+        _ = onEnd
         let id = UUID()
         lock.lock()
         subscribers[id] = onAngle
-        let startInner = innerWatch == nil
+        let startInner = run == nil && restart == nil
         // The stream is change-driven: its standing angle came once, at
         // start. A watcher joining a running monitor gets it now.
-        let standing = startInner ? nil : last?.angle
+        let known = startInner ? nil : last?.angle
         lock.unlock()
-        if let standing { onAngle(standing) }
-        if startInner {
-            let started = inner.watch { [weak self] angle in self?.deliver(angle) }
-            lock.lock()
-            innerWatch = started
-            lock.unlock()
-        }
+        if let known { onAngle(known) }
+        if startInner { startInnerWatch() }
         return Subscription { [weak self] in self?.remove(id) }
     }
 
-    private func deliver(_ angle: HingeAngle) {
+    /// One run of the monitor. Samples and the end are attributed to
+    /// the run that produced them, so a run that has been replaced or
+    /// cancelled changes nothing when it speaks late.
+    private final class Run: @unchecked Sendable {
+        var watch: (any HingeWatch)?
+        var ended = false
+    }
+    private var run: Run?
+
+    private func startInnerWatch() {
+        let run = Run()
         lock.lock()
+        self.run = run
+        innerSpoke = false
+        lock.unlock()
+        let started = inner.watch(
+            onAngle: { [weak self] angle in self?.deliver(angle, from: run) },
+            onEnd: { [weak self] in self?.innerEnded(run) }
+        )
+        lock.lock()
+        guard self.run === run else {
+            // Nobody wants it any more (the last subscriber left while
+            // the monitor was spawning).
+            lock.unlock()
+            started.cancel()
+            return
+        }
+        run.watch = started
+        if run.ended {
+            // It ended before we could register it: treat as an end now.
+            lock.unlock()
+            innerEnded(run, registered: true)
+            return
+        }
+        innerWatch = started
+        lock.unlock()
+    }
+
+    private func deliver(_ angle: HingeAngle, from run: Run) {
+        lock.lock()
+        guard self.run === run else {
+            lock.unlock()
+            return
+        }
         last = (angle, now())
+        innerSpoke = true
+        silentEnds = 0
         let targets = Array(subscribers.values)
         lock.unlock()
         for target in targets { target(angle) }
     }
 
+    /// The monitor stopped without being asked to. Forget it — the
+    /// angle is answered by grace period and one-shot read meanwhile —
+    /// and, if anyone still listens, bring it back.
+    private func innerEnded(_ run: Run, registered: Bool = false) {
+        lock.lock()
+        guard self.run === run else {
+            lock.unlock()
+            return
+        }
+        run.ended = true
+        guard registered || run.watch != nil else {
+            // `startInnerWatch` has not registered it yet; it will see
+            // `ended` and come back here.
+            lock.unlock()
+            return
+        }
+        self.run = nil
+        innerWatch = nil
+        let spoke = innerSpoke
+        if !spoke { silentEnds += 1 }
+        let delay = spoke ? 0 : Self.restartDelay(afterSilentEnds: silentEnds)
+        restart?.cancel()
+        restart = nil
+        if !subscribers.isEmpty {
+            restart = schedule(delay) { [weak self] in self?.restartInner() }
+        }
+        lock.unlock()
+    }
+
+    private func restartInner() {
+        lock.lock()
+        restart = nil
+        let start = run == nil && !subscribers.isEmpty
+        lock.unlock()
+        if start { startInnerWatch() }
+    }
+
     private func remove(_ id: UUID) {
         lock.lock()
         subscribers[id] = nil
-        let stop = subscribers.isEmpty ? innerWatch : nil
-        if stop != nil { innerWatch = nil }
+        var stop: (any HingeWatch)?
+        var pending: DispatchWorkItem?
+        if subscribers.isEmpty {
+            stop = innerWatch
+            innerWatch = nil
+            run = nil
+            pending = restart
+            restart = nil
+        }
         lock.unlock()
         stop?.cancel()
+        pending?.cancel()
     }
 
     private final class Subscription: HingeWatch, @unchecked Sendable {

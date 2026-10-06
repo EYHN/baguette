@@ -6,9 +6,14 @@ import Foundation
 /// reaches backboardd but on a touchscreen service, which SpringBoard
 /// ignores; Device Hub's own `mainScreenButtons` service is what it
 /// listens to, and the keys it sends are the ones below.
-struct FoldableInput: Input {
+struct FoldableInput: Input, DisplayAddressable {
     let touches: any Input
     let keys: any DeviceKeys
+
+    /// A line that names its panel is for the touches underneath.
+    func addressing<T>(screenID: UInt32, _ body: () -> T) -> T? {
+        (touches as? any DisplayAddressable)?.addressing(screenID: screenID, body)
+    }
 
     /// Device Hub's hold: a quarter second between down and up.
     static let hold: TimeInterval = 0.25
@@ -33,6 +38,11 @@ struct FoldableInput: Input {
         do {
             try keys.press(key, hold: duration > 0 ? duration : Self.hold)
             return true
+        } catch HingeError.toolMissing {
+            // A build without `HingeControl` (a host that embeds the
+            // library without its resource bundle) still has the host's
+            // own press through the legacy button service.
+            return touches.button(button, duration: duration)
         } catch {
             log("[keys] press \(button.rawValue) failed: \(error)")
             return false

@@ -11,27 +11,40 @@ struct VerifiedDeviceAssets: @unchecked Sendable {
     private let cacheRoot: URL
     private let fetch: Fetch
     private let developerDir: () -> String
+    private let installedXcodes: () -> [URL]
 
+    /// `installedXcodes` lists every Xcode's `Contents` directory on the
+    /// host, for an asset the selected Xcode does not carry.
     init(
         cacheRoot: URL = Self.defaultCacheRoot,
         fetch: @escaping Fetch = { try Data(contentsOf: $0) },
-        developerDir: @escaping () -> String = { CoreSimulators.developerDir() }
+        developerDir: @escaping () -> String = { CoreSimulators.developerDir() },
+        installedXcodes: @escaping () -> [URL] = Self.applicationsXcodes
     ) {
         self.cacheRoot = cacheRoot
         self.fetch = fetch
         self.developerDir = developerDir
+        self.installedXcodes = installedXcodes
     }
 
     func resolve(_ model: InstalledDeviceModel) throws -> URL {
         // An asset Apple ships inside Xcode: `<Xcode>/Contents/<resource>`,
-        // the developer dir being `<Xcode>/Contents/Developer`.
+        // the developer dir being `<Xcode>/Contents/Developer`. The
+        // selected Xcode is asked first; a model whose asset only a
+        // newer Xcode ships (iPhone Duo's arrived with 27.1, the
+        // simulator itself runs under 27.0) is found in any other
+        // install rather than refused.
         if let resource = model.definition.asset.xcodeResource, !resource.isEmpty {
-            let contents = URL(fileURLWithPath: developerDir()).deletingLastPathComponent()
-            let candidate = contents.appending(path: resource)
-            guard FileManager.default.fileExists(atPath: candidate.path) else {
-                throw DeviceModelError.localAssetNotFound(resource)
+            let selected = URL(fileURLWithPath: developerDir()).deletingLastPathComponent()
+            var contents = [selected]
+            for other in installedXcodes() where other.standardizedFileURL != selected.standardizedFileURL {
+                contents.append(other)
             }
-            return candidate
+            for directory in contents {
+                let candidate = directory.appending(path: resource)
+                if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            }
+            throw DeviceModelError.localAssetNotFound(resource)
         }
         if model.definition.asset.file != nil {
             do {
@@ -86,6 +99,17 @@ struct VerifiedDeviceAssets: @unchecked Sendable {
         SHA256.hash(data: data)
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+
+    /// Every `/Applications/Xcode*.app/Contents`, newest name last so a
+    /// later beta is tried after a release of the same major.
+    static func applicationsXcodes() -> [URL] {
+        let applications = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: applications.path)) ?? []
+        return entries
+            .filter { $0.hasPrefix("Xcode") && $0.hasSuffix(".app") }
+            .sorted()
+            .map { applications.appending(path: $0).appending(path: "Contents") }
     }
 
     private static var defaultCacheRoot: URL {

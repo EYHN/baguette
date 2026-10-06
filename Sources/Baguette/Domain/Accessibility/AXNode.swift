@@ -33,9 +33,13 @@ struct AXNode: Equatable, Sendable {
     let label: String?
     let value: String?
     let identifier: String?
+    let nodeId: String?
     let title: String?
     let help: String?
     let frame: Rect
+    let activationPoint: Point?
+    let sliderTrack: [Point]?
+    let adjustmentActions: [String]
     let enabled: Bool
     let focused: Bool
     let hidden: Bool
@@ -48,9 +52,13 @@ struct AXNode: Equatable, Sendable {
         label: String? = nil,
         value: String? = nil,
         identifier: String? = nil,
+        nodeId: String? = nil,
         title: String? = nil,
         help: String? = nil,
         frame: Rect,
+        activationPoint: Point? = nil,
+        sliderTrack: [Point]? = nil,
+        adjustmentActions: [String] = [],
         enabled: Bool = true,
         focused: Bool = false,
         hidden: Bool = false,
@@ -62,9 +70,13 @@ struct AXNode: Equatable, Sendable {
         self.label = label
         self.value = value
         self.identifier = identifier
+        self.nodeId = nodeId
         self.title = title
         self.help = help
         self.frame = frame
+        self.activationPoint = activationPoint
+        self.sliderTrack = sliderTrack
+        self.adjustmentActions = adjustmentActions
         self.enabled = enabled
         self.focused = focused
         self.hidden = hidden
@@ -127,14 +139,18 @@ struct AXNode: Equatable, Sendable {
         from element: NSObject,
         transform: AXFrameTransform,
         depthCap: Int = 60,
-        deadline: Date = .distantFuture
+        deadline: Date = .distantFuture,
+        device: String? = nil,
+        prepare: (NSObject) -> Void = { _ in }
     ) -> AXNode {
         walkInternal(
             element: element,
             depth: 0,
             transform: transform,
             depthCap: depthCap,
-            deadline: deadline
+            deadline: deadline,
+            device: device,
+            prepare: prepare
         )
     }
 
@@ -143,9 +159,13 @@ struct AXNode: Equatable, Sendable {
         depth: Int,
         transform: AXFrameTransform,
         depthCap: Int,
-        deadline: Date
+        deadline: Date,
+        device: String?,
+        prepare: (NSObject) -> Void
     ) -> AXNode {
+        prepare(element)
         let role = AXElementReader.string(element, "accessibilityRole") ?? "AXUnknown"
+        let subrole = AXElementReader.string(element, "accessibilitySubrole")
         let macFrame = AXElementReader.frame(of: element)
         let projected = transform.map(macFrame)
 
@@ -154,31 +174,56 @@ struct AXNode: Equatable, Sendable {
             children = []
         } else {
             let kids = AXElementReader.children(of: element)
-            children = kids.map {
-                walkInternal(
-                    element: $0,
+            var collected: [AXNode] = []
+            for kid in kids {
+                guard Date() < deadline else { break }
+                collected.append(walkInternal(
+                    element: kid,
                     depth: depth + 1,
                     transform: transform,
                     depthCap: depthCap,
-                    deadline: deadline
-                )
+                    deadline: deadline,
+                    device: device,
+                    prepare: prepare
+                ))
             }
+            children = collected
+        }
+
+        // Wide SwiftUI switches include their label in the AX frame.
+        // Transform the switch's logical point, not its rotated bounds.
+        let isSwitch = role == "AXSwitch" || subrole == "AXSwitch"
+        let track: [Point]? = role == "AXSlider" && macFrame.width > macFrame.height * 2
+            ? [macFrame.minX, macFrame.maxX].map { x in
+                let p = transform.map(CGRect(x: x, y: macFrame.midY, width: 0, height: 0)).origin
+                return Point(x: p.x, y: p.y)
+            } : nil
+        let activation: Point?
+        if isSwitch && macFrame.width > 100 {
+            let p = transform.map(CGRect(x: macFrame.maxX - 31, y: macFrame.midY, width: 0, height: 0)).origin
+            activation = Point(x: p.x, y: p.y)
+        } else {
+            activation = nil
         }
 
         return AXNode(
             role: role,
-            subrole: AXElementReader.string(element, "accessibilitySubrole"),
-            label: AXElementReader.string(element, "accessibilityLabel"),
-            value: AXElementReader.stringOrNumber(element, "accessibilityValue"),
+            subrole:    subrole,
+            label:      AXElementReader.string(element, "accessibilityLabel"),
+            value:      AXElementReader.stringOrNumber(element, "accessibilityValue"),
             identifier: AXElementReader.string(element, "accessibilityIdentifier"),
-            title: AXElementReader.string(element, "accessibilityTitle"),
-            help: AXElementReader.string(element, "accessibilityHelp"),
+            nodeId: AXElementReader.nodeID(element, device: device),
+            title:      AXElementReader.string(element, "accessibilityTitle"),
+            help:       AXElementReader.string(element, "accessibilityHelp"),
             frame: Rect(
                 origin: Point(x: Double(projected.origin.x), y: Double(projected.origin.y)),
                 size: Size(width: Double(projected.size.width), height: Double(projected.size.height))
             ),
-            enabled: AXElementReader.bool(element, "accessibilityEnabled", default: true)
-                || AXElementReader.bool(element, "isAccessibilityEnabled", default: false),
+            activationPoint: activation,
+            sliderTrack: track,
+            adjustmentActions: AXElementReader.adjustmentActions(element),
+            enabled: AXElementReader.bool(element, "isAccessibilityEnabled", default:
+                AXElementReader.bool(element, "accessibilityEnabled", default: true)),
             focused: AXElementReader.bool(element, "isAccessibilityFocused", default: false)
                 || AXElementReader.bool(element, "accessibilityFocused", default: false),
             hidden: AXElementReader.bool(element, "isAccessibilityHidden", default: false)
@@ -194,17 +239,22 @@ struct AXNode: Equatable, Sendable {
             "label": label as Any? ?? NSNull(),
             "value": value as Any? ?? NSNull(),
             "identifier": identifier as Any? ?? NSNull(),
-            "title": title as Any? ?? NSNull(),
-            "help": help as Any? ?? NSNull(),
+            "nodeId": nodeId as Any? ?? NSNull(),
+            "title":      title as Any? ?? NSNull(),
+            "help":       help as Any? ?? NSNull(),
             "frame": [
                 "x": frame.origin.x,
                 "y": frame.origin.y,
                 "width": frame.size.width,
                 "height": frame.size.height,
             ],
-            "enabled": enabled,
-            "focused": focused,
-            "hidden": hidden,
+            "enabled":  enabled,
+            "adjustable": !adjustmentActions.isEmpty,
+            "adjustmentActions": adjustmentActions,
+            "activationPoint": activationPoint.map { ["x": $0.x, "y": $0.y] } as Any? ?? NSNull(),
+            "sliderTrack": sliderTrack.map { $0.map { ["x": $0.x, "y": $0.y] } } as Any? ?? NSNull(),
+            "focused":  focused,
+            "hidden":   hidden,
             "children": children.map(\.dictionary),
         ]
         if let screen {

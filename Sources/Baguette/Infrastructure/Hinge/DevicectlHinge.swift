@@ -82,7 +82,10 @@ final class DevicectlHinge: Hinge, @unchecked Sendable {
         throw HingeError.toolMissing
     }
 
-    func watch(onAngle: @escaping @Sendable (HingeAngle) -> Void) -> any HingeWatch {
+    func watch(
+        onAngle: @escaping @Sendable (HingeAngle) -> Void,
+        onEnd: @escaping @Sendable () -> Void
+    ) -> any HingeWatch {
         let watch = Watch(child: subprocess())
         do {
             try watch.child.run(
@@ -95,10 +98,15 @@ final class DevicectlHinge: Hinge, @unchecked Sendable {
                         }
                     }
                 },
-                onExit: { _ in watch.cancel() }
+                // The monitor went away on its own — killed, crashed, or
+                // its day-long timeout ran out. Its consumer hears about
+                // it; one it cancelled itself is not news.
+                onExit: { _ in
+                    if watch.end() { onEnd() }
+                }
             )
         } catch {
-            watch.cancel()
+            if watch.end() { onEnd() }
         }
         return watch
     }
@@ -142,6 +150,16 @@ final class DevicectlHinge: Hinge, @unchecked Sendable {
             cancelled = true
             lock.unlock()
             if first { child.terminate() }
+        }
+
+        /// The child is gone. True when this watch had not been cancelled,
+        /// so the end was the monitor's doing and the consumer should hear.
+        func end() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            let first = !cancelled
+            cancelled = true
+            return first
         }
     }
 }

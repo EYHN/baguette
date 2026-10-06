@@ -216,18 +216,14 @@ final class CoreSimulators: Simulators, DeviceHost, @unchecked Sendable {
     }
 
     private static func xcodeSelectDir() -> String? {
-        let pipe = Pipe()
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
-        task.arguments = ["-p"]
-        task.standardOutput = pipe
-        do { try task.run() } catch { return nil }
-        task.waitUntilExit()
-        let out =
-            String(
-                data: pipe.fileHandleForReading.readDataToEndOfFile(),
-                encoding: .utf8
-            )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let result = try? HostProcess.capture(
+            executable: URL(fileURLWithPath: "/usr/bin/xcode-select"),
+            arguments: ["-p"]
+        ), result.status == 0 else { return nil }
+        let out = String(
+            data: result.output,
+            encoding: .utf8
+        )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return out.isEmpty ? nil : out
     }
 

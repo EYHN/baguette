@@ -57,7 +57,16 @@ struct DeviceRenderPlan: Equatable, Sendable {
     let screenOrientation: DeviceOrientation?
 
     var screenPanel: IntegratedPanel? {
-        hingeDegrees.map { HingeAngle(degrees: $0).litPanel }
+        hingeDegrees.map(Self.posedPanel(hingeDegrees:))
+    }
+
+    /// The panel a still render lights at `hingeDegrees`. A saved capture
+    /// has no device to ask, so the pose is drawn the way the runtime
+    /// settles a slow sweep: the cover below 90°, the unfolded panel from
+    /// there on. A live device's lit panel is Core Device's answer
+    /// (`Simulator.litPanel()`), never this.
+    static func posedPanel(hingeDegrees: Double) -> IntegratedPanel {
+        hingeDegrees >= 90 ? .secondary : .primary
     }
 
     var screenRotation: ScreenRotation {
@@ -105,7 +114,7 @@ struct DeviceRenderPlan: Equatable, Sendable {
         // a phone's one panel turns like a cover.
         let litPanel = model.definition.scene.fold == nil
             ? IntegratedPanel.primary
-            : HingeAngle(degrees: hingeDegrees ?? 180).litPanel
+            : posedPanel(hingeDegrees: hingeDegrees ?? 180)
         let roll = screenOrientation.map { InterfaceRoll.degrees($0, litPanel: litPanel) } ?? 0
         return DeviceRenderPlan(
             model: model,

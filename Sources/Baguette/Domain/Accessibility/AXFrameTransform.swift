@@ -7,8 +7,32 @@ import Foundation
 struct AXFrameTransform: Equatable, Sendable {
     let pointSize: CGSize
     let orientation: DeviceOrientation
+    /// The application root exactly as AXP reported it, when it came in
+    /// the panel's own portrait shape under a landscape UI; see
+    /// `presenting(rootFrame:pointSize:orientation:)`.
+    var panelShapedRoot: CGRect? = nil
+
+    /// The transform for an application whose root AXP reported as
+    /// `rootFrame`. On a panel mounted sideways (iPhone Duo's inner
+    /// display) a landscape UI's elements arrive in the upright frame but
+    /// the root arrives as the panel's portrait rectangle; rotated like
+    /// an element it would leave the panel. That root is the whole panel.
+    static func presenting(
+        rootFrame: CGRect, pointSize: CGSize, orientation: DeviceOrientation
+    ) -> AXFrameTransform {
+        let landscapeUI = orientation == .landscapeLeft || orientation == .landscapeRight
+        let panelShaped = landscapeUI && rootFrame.width < rootFrame.height
+            && abs(rootFrame.width - pointSize.width) < 1 && abs(rootFrame.height - pointSize.height) < 1
+        return AXFrameTransform(
+            pointSize: pointSize, orientation: orientation,
+            panelShapedRoot: panelShaped ? rootFrame : nil
+        )
+    }
 
     func map(_ frame: CGRect) -> CGRect {
+        if let panelShapedRoot, frame == panelShapedRoot {
+            return CGRect(origin: .zero, size: pointSize)
+        }
         switch orientation {
         case .portrait:
             return frame
