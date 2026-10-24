@@ -9,8 +9,9 @@ enum ConnectedScreens {
     /// Runtime IOSurface dims win when areas differ.
     static let carPlayPlistSize = Size(width: 720, height: 480)
 
-    /// `litPanel` is which of a foldable's panels the hinge has lit —
-    /// `HingeAngle.litPanel`. Defaults to the cover, which is how every
+    /// `litPanel` is which of a foldable's panels the device presents
+    /// on — Core Device's answer (`Simulator.litPanel()`). Defaults to
+    /// the cover, which is how every
     /// device boots and the only panel a single-panel device has.
     static func binding(
         kind: DisplayKind,
@@ -27,19 +28,20 @@ enum ConnectedScreens {
 
     /// The exact phone panel an observation is read from, with the
     /// scale that turns its framebuffer pixels into points. A foldable
-    /// needs a hinge angle to name the lit panel; a missing angle, an
+    /// needs Core Device's answer to name the lit panel (the hinge angle
+    /// does not imply it; see `ActiveDisplays`); a missing answer, an
     /// absent or ambiguous framebuffer, or an unusable scale is an
     /// error, never a fallback to another panel.
     static func observedPhone(
-        ports: [SizedFramebufferPort], screens: [ConnectedScreenRecord], angle: HingeAngle?
+        ports: [SizedFramebufferPort], screens: [ConnectedScreenRecord], litPanel: IntegratedPanel?
     ) throws -> (binding: DisplayBinding, scale: Double, multiplePanels: Bool) {
         let integrated = screens.filter { $0.screenType == .integrated }
         let record: ConnectedScreenRecord
         if integrated.count == 1, let only = integrated.first {
             record = only
         } else {
-            guard integrated.count > 1, let angle,
-                let lit = integrated.first(where: { $0.panel == angle.litPanel })
+            guard integrated.count > 1, let litPanel,
+                let lit = integrated.first(where: { $0.panel == litPanel })
             else { throw ObservedScreenError.unavailable }
             record = lit
         }

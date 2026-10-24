@@ -226,6 +226,31 @@ struct DeviceChromeTests {
         #expect(naked.offset == Point(x: 0, y: 0))
     }
 
+    @Test func `home button parses center alignment on the bottom edge`() throws {
+        let json = Data(#"""
+        {
+          "identifier": "phone",
+          "inputs": [
+            {
+              "name": "home",
+              "image": "Home BTN",
+              "anchor": "bottom",
+              "align": "center",
+              "offsets": {
+                "normal": { "x": 0, "y": -90 },
+                "rollover": { "x": 0, "y": -90 }
+              }
+            }
+          ]
+        }
+        """#.utf8)
+
+        let chrome = try DeviceChrome.parsing(json: json)
+        let home = try #require(chrome.buttons.first)
+        #expect(home.anchor == .bottom)
+        #expect(home.align == .center)
+    }
+
     @Test func `button skips entries missing required name or image fields`() throws {
         let json = Data(#"""
         {

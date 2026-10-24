@@ -34,9 +34,15 @@ struct TypeText: Gesture, Equatable {
         return TypeText(text: text, keystrokes: strokes)
     }
 
+    /// Text is a stream, not a sequence of user-held keys: each key is
+    /// held 5 ms, where a single `key` gesture defaults to 100 ms. The
+    /// HID client keeps the order, so a long string types in a fraction
+    /// of the time without losing characters.
+    static let hold: Double = 0.005
+
     func execute(on input: any Input) -> Bool {
         for s in keystrokes {
-            if !s.key.press(modifiers: s.modifiers, on: input) {
+            if !s.key.press(modifiers: s.modifiers, duration: Self.hold, on: input) {
                 return false
             }
         }

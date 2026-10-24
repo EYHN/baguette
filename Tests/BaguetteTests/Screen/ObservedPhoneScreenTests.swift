@@ -16,44 +16,44 @@ struct ObservedPhoneScreenTests {
         SizedFramebufferPort(portName: "inner", size: inner.size),
     ]
 
-    @Test func `a single integrated screen binds without a hinge sample or a panel name`() throws {
+    @Test func `a single integrated screen binds without Core Device or a panel name`() throws {
         let anonymous = ConnectedScreenRecord(
             screenId: 1, name: "LCD", screenType: .integrated, size: Self.cover.size, scale: 3)
-        let observed = try ConnectedScreens.observedPhone(ports: [Self.ports[0]], screens: [anonymous], angle: nil)
+        let observed = try ConnectedScreens.observedPhone(ports: [Self.ports[0]], screens: [anonymous], litPanel: nil)
         #expect(observed.binding.connectedScreenId == 1)
         #expect(observed.binding.panel == nil)
         #expect(observed.multiplePanels == false)
         #expect(observed.binding.pointSize(scale: observed.scale) == Size(width: 402, height: 874))
     }
 
-    @Test func `two panels bind the one the hinge lights`() throws {
+    @Test func `two panels bind the one Core Device names lit`() throws {
         let opened = try ConnectedScreens.observedPhone(
-            ports: Self.ports, screens: [Self.cover, Self.inner], angle: HingeAngle(degrees: 180))
+            ports: Self.ports, screens: [Self.cover, Self.inner], litPanel: .secondary)
         #expect(opened.binding.connectedScreenId == 2)
         #expect(opened.binding.panel == .secondary)
         #expect(opened.multiplePanels)
         #expect(opened.binding.pointSize(scale: opened.scale) == Size(width: 1100, height: 1400))
 
         let closed = try ConnectedScreens.observedPhone(
-            ports: Self.ports, screens: [Self.cover, Self.inner], angle: HingeAngle(degrees: 3))
+            ports: Self.ports, screens: [Self.cover, Self.inner], litPanel: .primary)
         #expect(closed.binding.connectedScreenId == 1)
         #expect(closed.binding.panel == .primary)
     }
 
-    @Test func `two panels without a fresh hinge sample fail instead of guessing the cover`() {
+    @Test func `two panels without Core Device's answer fail instead of guessing the cover`() {
         #expect(throws: ObservedScreenError.unavailable) {
-            try ConnectedScreens.observedPhone(ports: Self.ports, screens: [Self.cover, Self.inner], angle: nil)
+            try ConnectedScreens.observedPhone(ports: Self.ports, screens: [Self.cover, Self.inner], litPanel: nil)
         }
     }
 
     @Test func `the lit panel needs exactly one framebuffer of its size`() {
         #expect(throws: ObservedScreenError.unavailable) {
             try ConnectedScreens.observedPhone(
-                ports: [Self.ports[0]], screens: [Self.cover, Self.inner], angle: HingeAngle(degrees: 180))
+                ports: [Self.ports[0]], screens: [Self.cover, Self.inner], litPanel: .secondary)
         }
         #expect(throws: ObservedScreenError.unavailable) {
             try ConnectedScreens.observedPhone(
-                ports: Self.ports + [Self.ports[1]], screens: [Self.cover, Self.inner], angle: HingeAngle(degrees: 180))
+                ports: Self.ports + [Self.ports[1]], screens: [Self.cover, Self.inner], litPanel: .secondary)
         }
     }
 
@@ -61,7 +61,7 @@ struct ObservedPhoneScreenTests {
         let unscaled = ConnectedScreenRecord(
             screenId: 1, name: "LCD", screenType: .integrated, size: Self.cover.size)
         #expect(throws: ObservedScreenError.unavailable) {
-            try ConnectedScreens.observedPhone(ports: [Self.ports[0]], screens: [unscaled], angle: nil)
+            try ConnectedScreens.observedPhone(ports: [Self.ports[0]], screens: [unscaled], litPanel: nil)
         }
     }
 }

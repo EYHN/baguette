@@ -10,6 +10,9 @@ For releases prior to this changelog, see the
 
 ## [Unreleased]
 
+### Fixed
+- `baguette hinge` and `GET /simulators/:udid/hinge` read iPhone Duo's hinge again on Xcode 27.1's release build, in a custom `--device-set` and right after a fold, so streams, screenshots, taps, `describe-ui` and hinge messages follow the lit panel. → [docs](docs/features/hinge/README.md#gotchas)
+
 ---
 
 ## [0.2.3] - 2026-10-05

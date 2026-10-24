@@ -6,7 +6,7 @@ import Foundation
 /// Moves iPhone Duo's hinge — Device Hub's pose picker from the CLI. The
 /// sweep runs inside the guest (`HingeControl`, spawned with `simctl
 /// spawn`), which sends the same HID pose events Device Hub does;
-/// SpringBoard swaps panels and `devicectl` reads the angle back. With
+/// SpringBoard swaps panels and `HingeControl` reads the angle back. With
 /// no flag it prints the current angle. See `docs/features/hinge/README.md`.
 struct HingeCLICommand: ParsableCommand {
     static let configuration = CommandConfiguration(

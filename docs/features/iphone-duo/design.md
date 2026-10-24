@@ -15,8 +15,8 @@ is `0x32`". Found on Xcode 27.1 beta / iOS 27.1.
 - Every phone-plane entry point (`tap` / `swipe` / `input`, `screenshot`,
   `stream`, `serve`, `record`, `describe-ui`, `chrome layout`) → the lit panel,
   from `HingeAngle.litPanel`.
-- **Read**: `DevicectlHinge` → `xcrun devicectl device motion hinge-angle`,
-  only when `IntegratedPanels.several`.
+- **Read**: `GuestHinge` → `HingeControl read-angle` / `watch-angle` in the
+  guest (CoreMotion), only when `IntegratedPanels.several`.
 - **Drive**: `baguette hinge`, `POST /simulators/<UDID>/hinge`, the page's
   `set_pose` → `Hinge.fold(to:over:)` → `GuestHingeMotor` → `HingeControl serve`
   in the guest (`Injected/HingeControl`) → private `HID.framework`'s

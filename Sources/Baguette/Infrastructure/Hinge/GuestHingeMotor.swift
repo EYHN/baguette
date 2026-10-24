@@ -8,7 +8,7 @@ import Foundation
 /// The tool registers a HID service shaped like dtuhidd's `avpCustom`
 /// and dispatches the pose events Device Hub sends (see
 /// `Injected/HingeControl/Sources/HingeControl.m`); the runtime folds,
-/// SpringBoard swaps panels, and `DevicectlHinge` reads the sweep back
+/// SpringBoard swaps panels, and `GuestHinge` reads the sweep back
 /// like any other. Kept rather than spawned per command: a spawn is most
 /// of a second, and the service stays registered between poses. Commands
 /// are played one at a time — a pick during a sweep queues behind it.
