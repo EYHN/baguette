@@ -26,6 +26,8 @@ final class IndigoHIDInput: Input, DisplayAddressable, @unchecked Sendable {
 
     private var client: AnyObject?
     private var warmed = false
+    /// Whether the keyboard-service route has released stale modifiers.
+    private var modifiersCleared = false
     private let lock = NSLock()
 
     // IndigoHIDMessageForMouseNSEvent — 9-arg shape (Xcode 26 preview-kit).
@@ -402,18 +404,38 @@ final class IndigoHIDInput: Input, DisplayAddressable, @unchecked Sendable {
             "[hid] key page=\(key.hidUsage.page) usage=\(key.hidUsage.usage) modifiers=\(mods.map(\.rawValue)) hold=\(holdUs)us"
         )
 
-        func press(_ usage: HIDUsage, while action: () -> Bool) -> Bool {
+        func release(_ usage: HIDUsage) -> Bool {
+            guard let up = kfn(target, usage.page, usage.usage, 2) else { return false }
+            return send(message: up, to: c)
+        }
+        // On the keyboard service one release does not let go of a
+        // modifier while the software keyboard is up (SimKit detaches the
+        // hardware keyboard): Shift stayed held after `A`, so the rest of
+        // `AirBuildPasteCheck 123` typed as `AIRBUILDPASTECHECK !@#`, and it
+        // stayed held for every later key, across sessions. A second
+        // release lets go; an extra release of a key that is already up
+        // changes nothing (measured on iPhone 18 Pro, iOS 27.0).
+        let modifierReleases = keyboard == nil ? 1 : 2
+        if keyboard != nil {
+            clearStaleModifiersOnce(release: release)
+        }
+
+        func press(_ usage: HIDUsage, releases: Int = 1, while action: () -> Bool) -> Bool {
             guard let down = kfn(target, usage.page, usage.usage, 1) else { return false }
             let pressed = send(message: down, to: c)
             let performed = pressed && action()
             // A failed send can have an unknown delivery outcome. Always release.
-            guard let up = kfn(target, usage.page, usage.usage, 2) else { return false }
-            let released = send(message: up, to: c)
+            var released = true
+            for _ in 0..<releases {
+                released = release(usage) && released
+            }
             return performed && released
         }
         func pressModifiers(_ remaining: ArraySlice<KeyModifier>) -> Bool {
             if let modifier = remaining.first {
-                return press(modifier.hidUsage) { pressModifiers(remaining.dropFirst()) }
+                return press(modifier.hidUsage, releases: modifierReleases) {
+                    pressModifiers(remaining.dropFirst())
+                }
             }
             return press(key.hidUsage) {
                 usleep(holdUs)
@@ -421,6 +443,22 @@ final class IndigoHIDInput: Input, DisplayAddressable, @unchecked Sendable {
             }
         }
         return pressModifiers(mods[...])
+    }
+
+    /// A modifier left held by an earlier session — a binary without the
+    /// double release above, or a press whose release never landed —
+    /// stays held in the guest until something lets go of it. The first
+    /// key of this input's life releases every modifier once, so a stuck
+    /// Shift does not uppercase the text typed next.
+    private func clearStaleModifiersOnce(release: (HIDUsage) -> Bool) {
+        lock.lock()
+        let first = !modifiersCleared
+        modifiersCleared = true
+        lock.unlock()
+        guard first else { return }
+        for modifier in KeyModifier.allCases {
+            _ = release(modifier.hidUsage)
+        }
     }
 
     /// Default tap is 100 ms — long enough for iOS to register the press
