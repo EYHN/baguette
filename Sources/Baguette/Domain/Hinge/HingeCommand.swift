@@ -6,7 +6,7 @@ struct HingeCommand: Equatable, Sendable {
     let degrees: Double
     let duration: TimeInterval
 
-    /// Device Hub's poses, as `devicectl` reads them back.
+    /// Device Hub's poses, as the guest reads them back.
     static let poses: [String: Double] = ["closed": 0, "open": 130, "flat": 180]
     /// Device Hub's own sweep: 0.5–0.85 s, ease-out.
     static let defaultDuration: TimeInterval = 0.8

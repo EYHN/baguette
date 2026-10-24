@@ -1,6 +1,19 @@
 import Foundation
 import IOSurface
 import ObjectiveC
+import Darwin
+
+private typealias UInt32Getter = @convention(c) (AnyObject, Selector) -> UInt32
+
+private let sendUInt32Message: UInt32Getter = {
+    let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "objc_msgSend")!
+    return unsafeBitCast(symbol, to: UInt32Getter.self)
+}()
+
+func invokeUInt32Getter(_ target: NSObject, _ selector: Selector) -> UInt32? {
+    guard target.responds(to: selector) else { return nil }
+    return sendUInt32Message(target, selector)
+}
 
 /// Production `Screen` — registers SimulatorKit framebuffer callbacks via
 /// the ObjC runtime and forwards `IOSurface` frames to the caller as they
@@ -22,10 +35,30 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
     private var descriptors: [NSObject] = []
     private var callbackUUIDs: [ObjectIdentifier: NSUUID] = [:]
     private var onFrame: (@Sendable (IOSurface) -> Void)?
+    private var onMetadata: (@Sendable (ScreenMetadata) -> Void)?
     private var idleTimer: DispatchSourceTimer?
     /// Guards against queueing duplicate captures — see `scheduleCapture`.
     /// Only ever touched on `queue`, which is serial.
     private var pending = PendingCapture()
+    /// The device's integrated panels, read once at `start`. More than
+    /// one means a foldable, and the plane to stream is whichever panel
+    /// it is presenting on (`ActiveDisplays`), not the largest surface.
+    private var panels = DisplayPanels(panels: [])
+
+    /// One integrated panel's current surface.
+    struct PanelSurface {
+        let panel: DisplayPanel
+        /// The panel by its Connected Screens name (`DisplayPanels.integratedPanel`).
+        let name: IntegratedPanel
+        let surface: IOSurface
+    }
+
+    /// Set before `start` by a consumer that wants a foldable's panels all
+    /// at once — lit or not — instead of the one it is presenting on. When
+    /// set, a foldable's frames arrive here and `onFrame` stays quiet; any
+    /// other device is unaffected. The second argument is the presenting
+    /// panel, when Core Device has said which.
+    var onPanels: (@Sendable ([PanelSurface], DisplayPanel?) -> Void)?
 
     init(udid: String, host: any DeviceHost, binding: DisplayBinding? = nil) {
         self.udid = udid
@@ -37,8 +70,12 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         host.resolveDevice(udid: udid)
     }
 
-    func start(onFrame: @escaping @Sendable (IOSurface) -> Void) throws {
+    func start(
+        onFrame: @escaping @Sendable (IOSurface) -> Void,
+        onMetadata: @escaping @Sendable (ScreenMetadata) -> Void
+    ) throws {
         self.onFrame = onFrame
+        self.onMetadata = onMetadata
 
         guard let device = resolveDevice() else {
             throw SimulatorError.notFound(udid: udid)
@@ -48,7 +85,20 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         else {
             throw ScreenError.ioUnavailable
         }
-        self.ioClient = io
+        ioClient = io
+        // The phone plane — bound by `SimulatorKitDisplay` to the panel lit
+        // at bind time, or unbound — follows the hinge from here on; a
+        // CarPlay or external plane has no panels to follow.
+        if (binding?.kind ?? .phone) == .phone {
+            panels = ActiveDisplays.panels(of: device)
+            if panels.isFoldable {
+                // Each answer re-emits a frame: the newly presenting panel
+                // may be showing a static screen that composites nothing.
+                ActiveDisplays.shared.beginWatching(udid: udid, owner: self) { [weak self] in
+                    self?.queue.async { self?.scheduleCapture() }
+                }
+            }
+        }
         try wireFramebuffer()
         startIdleFloorIfNeeded()
     }
@@ -56,10 +106,13 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
     func stop() {
         idleTimer?.cancel()
         idleTimer = nil
+        if panels.isFoldable { ActiveDisplays.shared.endWatching(udid: udid, owner: self) }
+        panels = DisplayPanels(panels: [])
         let unregSel = NSSelectorFromString("unregisterScreenCallbacksWithUUID:")
         for desc in descriptors {
             if let uuid = callbackUUIDs[ObjectIdentifier(desc)],
-               desc.responds(to: unregSel) {
+               desc.responds(to: unregSel)
+            {
                 desc.perform(unregSel, with: uuid)
             }
         }
@@ -67,6 +120,7 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         callbackUUIDs.removeAll()
         ioClient = nil
         onFrame = nil
+        onMetadata = nil
     }
 
     // MARK: - private
@@ -143,7 +197,9 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         let surfaces: @convention(block) () -> Void = { [weak self] in
             self?.scheduleCapture()
         }
-        let props: @convention(block) () -> Void = {}
+        let props: @convention(block) (AnyObject?) -> Void = { [weak self] _ in
+            self?.scheduleMetadataCapture()
+        }
 
         guard let imp = class_getMethodImplementation(type(of: desc), regSel) else {
             throw ScreenError.callbackUnavailable
@@ -174,10 +230,19 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
         }
     }
 
+    /// Property callbacks are rare (orientation flips, scale changes) and do
+    /// not imply new pixels, so they bypass the frame coalescer and publish
+    /// metadata directly without manufacturing a framebuffer event.
+    private func scheduleMetadataCapture() {
+        queue.async { [weak self] in
+            self?.captureLatestMetadata()
+        }
+    }
+
     /// Picks the descriptor for this screen's plane and forwards its
-    /// IOSurface to `onFrame`. CarPlay bindings never fall back to the
-    /// phone plane — missing external surfaces emit nothing.
-    /// Drains its own autorelease pool.
+    /// IOSurface and authoritative properties. CarPlay bindings never
+    /// fall back to the phone plane — missing external surfaces emit
+    /// nothing. Drains its own autorelease pool.
     ///
     /// `framebufferSurface` forwards through ROCKit to CoreSimulatorService,
     /// and that round-trip leaves XPC replies, dispatch groups and the
@@ -194,21 +259,81 @@ final class SimulatorKitScreen: Screen, @unchecked Sendable {
     }
 
     private func performCapture() {
+        guard let latest = latestFramebuffer() else { return }
+        onMetadata?(metadata(for: latest.descriptor, panel: latest.panel))
+        if let onPanels, panels.isFoldable {
+            onPanels(panelSurfaces(among: latest.surfaces), latest.panel)
+        } else {
+            onFrame?(latest.surface)
+        }
+    }
+
+    /// Every integrated panel's surface, out of the surfaces this capture
+    /// already fetched. Panels differ in size, which is what tells their
+    /// framebuffer ports apart.
+    private func panelSurfaces(among surfaces: [IOSurface]) -> [PanelSurface] {
+        panels.panels.compactMap { panel in
+            surfaces.first {
+                IOSurfaceGetWidth($0) == Int(panel.pixelSize.width)
+                    && IOSurfaceGetHeight($0) == Int(panel.pixelSize.height)
+            }.map { PanelSurface(panel: panel, name: panels.integratedPanel(panel) ?? .primary, surface: $0) }
+        }
+    }
+
+    /// See `scheduleMetadataCapture` — same descriptor pick as a frame
+    /// capture, metadata only. Reads `framebufferSurface` (an XPC
+    /// round-trip), so it drains its own pool too.
+    private func captureLatestMetadata() {
+        autoreleasepool {
+            guard let latest = latestFramebuffer() else { return }
+            onMetadata?(metadata(for: latest.descriptor, panel: latest.panel))
+        }
+    }
+
+    private func latestFramebuffer() -> (surface: IOSurface, descriptor: NSObject, panel: DisplayPanel?, surfaces: [IOSurface])? {
         let surfSel = NSSelectorFromString("framebufferSurface")
-        var surfaces: [(IOSurface, Size)] = []
+        var candidates: [(surface: IOSurface, descriptor: NSObject, size: Size)] = []
         for desc in descriptors {
             guard let surfObj = desc.perform(surfSel)?.takeUnretainedValue() else { continue }
-            let surf = unsafeBitCast(surfObj, to: IOSurface.self)
+            let surf = unsafeDowncast(surfObj, to: IOSurface.self)
             let w = IOSurfaceGetWidth(surf)
             let h = IOSurfaceGetHeight(surf)
             guard w > 0, h > 0 else { continue }
-            surfaces.append((surf, Size(width: Double(w), height: Double(h))))
+            candidates.append((surf, desc, Size(width: Double(w), height: Double(h))))
+        }
+        // A foldable keeps a surface on both panels, so size says nothing
+        // about which one is live; the presenting panel's own surface is
+        // the plane. Panels differ in size, which identifies the surface
+        // without a per-frame property round-trip.
+        if let panel = ActiveDisplays.shared.activePanel(udid: udid, among: panels),
+           let match = candidates.first(where: {
+               $0.size.width == Double(panel.pixelSize.width) && $0.size.height == Double(panel.pixelSize.height)
+           }) {
+            return (match.surface, match.descriptor, panel, candidates.map(\.surface))
         }
         guard let index = FramebufferSurfacePick.index(
             binding: binding,
-            candidates: surfaces.map(\.1)
-        ) else { return }
-        onFrame?(surfaces[index].0)
+            candidates: candidates.map(\.size)
+        ) else { return nil }
+        return (candidates[index].surface, candidates[index].descriptor, nil, candidates.map(\.surface))
+    }
+
+    private func metadata(for descriptor: NSObject, panel: DisplayPanel?) -> ScreenMetadata {
+        let propertiesSelector = NSSelectorFromString("screenProperties")
+        let orientationSelector = NSSelectorFromString("uiOrientation")
+        guard descriptor.responds(to: propertiesSelector),
+              let properties = descriptor.perform(propertiesSelector)?
+              .takeUnretainedValue() as? NSObject,
+              let rawValue = invokeUInt32Getter(properties, orientationSelector)
+        else {
+            return ScreenMetadata(uiOrientation: nil)
+        }
+        return ScreenMetadata(
+            uiOrientation: ScreenOrientation(
+                simulatorKitRawValue: panel?.canonicalUIOrientation(Int(rawValue))
+                    ?? ScreenOrientation.canonicalRaw(Int(rawValue), xcodeMajor: SimulatorKitFramework.hostXcodeMajor)
+            )
+        )
     }
 }
 

@@ -49,8 +49,16 @@ protocol Simulator: Sendable {
     func displays() -> any Displays
 
     /// The device's hinge — meaningful on a foldable, where its angle
-    /// decides which panel the phone plane binds. Read-only today.
+    /// poses the 3D model and says when to ask which panel lit.
     func hinge() -> any Hinge
+
+    /// Which of a foldable's panels the device is presenting on, as
+    /// Core Device reports it. The hinge angle is not consulted: the
+    /// runtime's pose provider decides from angle, speed and history,
+    /// and an app may light the cover while the device is open, so no
+    /// threshold reproduces its choice. `nil` on a single-panel device,
+    /// or when Core Device cannot say.
+    func litPanel() -> IntegratedPanel?
 
     /// Host external-display panel (CarPlay enablement).
     func externalDisplays() -> any ExternalDisplays
@@ -204,14 +212,14 @@ extension Simulator {
     /// describe right now.
     ///
     /// One panel is the only answer on every device but a foldable,
-    /// and it is answered from the profile alone. A foldable asks its
-    /// hinge — a devicectl round-trip — and takes no reading as folded,
-    /// which is how the device boots.
+    /// and it is answered from the profile alone. A foldable asks Core
+    /// Device (`litPanel()`) and takes no answer as folded, which is how
+    /// the device boots.
     func litPanel(in chromes: any Chromes) -> IntegratedPanel {
         guard chromes.panels(forDeviceName: deviceTypeName).contains(.secondary) else {
             return .primary
         }
-        return hinge().angle()?.litPanel ?? .primary
+        return litPanel() ?? .primary
     }
 
     /// Resolve the installed 3D model for this simulator. Device type

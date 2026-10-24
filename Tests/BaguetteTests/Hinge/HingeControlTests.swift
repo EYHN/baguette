@@ -62,15 +62,37 @@ struct HingeControlTests {
         """)
     }
 
+    /// `read-angle` and `watch-angle` print each valid sample the guest's
+    /// CoreMotion reports as `angle <degrees>`; an invalid one is no reading.
+    @Test func `should report each valid hinge sample to the host as an angle line`() throws {
+        try Self.run(compiling: """
+        #import "HingeAngle.h"
+        #include <assert.h>
+        #include <string.h>
+        int main(void) {
+          @autoreleasepool {
+            char *text = NULL; size_t length = 0;
+            FILE *output = open_memstream(&text, &length);
+            assert(reportHingeSample(output, 130, YES));
+            assert(!reportHingeSample(output, 0, NO));
+            assert(reportHingeSample(output, 3.25, YES));
+            fclose(output);
+            assert(strcmp(text, "angle 130\\nangle 3.25\\n") == 0);
+          }
+          return 0;
+        }
+        """)
+    }
+
     /// Every case here must exit before the helper creates HID services.
     @Test func `invalid arguments and late starts exit before creating HID services`() throws {
         let scratch = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
         let helper = scratch.appending(path: "HingeControl")
-        // `frontmost` lives in its own translation unit; the helper links both.
+        // `frontmost` and the hinge readers live in their own translation units.
         try Self.compile(
-            ["HingeControl.m", "Frontmost.m"].map { Self.sources.appending(path: $0).path }, to: helper)
+            ["HingeControl.m", "Frontmost.m", "HingeAngle.m"].map { Self.sources.appending(path: $0).path }, to: helper)
         let cases: [([String], Int32)] = [
             ([], 2),
             (["orientation"], 2),

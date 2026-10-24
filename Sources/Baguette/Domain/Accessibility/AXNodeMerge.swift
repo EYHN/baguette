@@ -55,12 +55,11 @@ extension AXNode {
         for child in children { child.collectContentLeaves(into: &out) }
     }
 
-    /// Stable de-duplication identity: role + identifier + label +
-    /// rounded frame. The sweep yields a *fresh* translation object
-    /// per point (object identity is useless) and re-hits one element
-    /// from several adjacent samples — this key recognises "same
-    /// element" across both.
+    /// Prefer the remote native identity, which survives fresh translation
+    /// wrappers and value changes. Fall back to semantic/geometry matching
+    /// only when native identity is unavailable.
     var dedupKey: String {
+        if let nodeId { return nodeId }
         let x = frame.origin.x.rounded()
         let y = frame.origin.y.rounded()
         let w = frame.size.width.rounded()
@@ -124,7 +123,10 @@ extension AXNode {
     private func withChildren(_ newChildren: [AXNode]) -> AXNode {
         AXNode(
             role: role, subrole: subrole, label: label, value: value,
-            identifier: identifier, title: title, help: help, frame: frame,
+            identifier: identifier, nodeId: nodeId, title: title, help: help, frame: frame,
+            activationPoint: activationPoint,
+            sliderTrack: sliderTrack,
+            adjustmentActions: adjustmentActions,
             enabled: enabled, focused: focused, hidden: hidden,
             children: newChildren, screen: screen
         )
