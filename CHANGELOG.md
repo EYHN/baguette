@@ -10,6 +10,9 @@ For releases prior to this changelog, see the
 
 ## [Unreleased]
 
+### Fixed
+- `describe-ui` on an Apple Watch (or any device that never rotates) no longer fails with `unknown(0)`: SimulatorKit never sets those devices' interface orientation, and the unset value now reads as the unturned panel. An iPhone or iPad that has not reported its orientation yet says so in plain words.
+
 ---
 
 ## [0.2.3] - 2026-10-05
