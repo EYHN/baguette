@@ -72,6 +72,34 @@ enum SimulatorKitFramebufferPorts {
         return result
     }
 
+    /// The `screenProperties` snapshot a framebuffer port's descriptor
+    /// carries for `screenID` — the same object `SimDeviceScreen` hands
+    /// out, read without constructing one. `SimDeviceScreen` wants
+    /// SimulatorKit's main queue and can trap when an embedding host
+    /// asks from a worker thread. Nil when no port answers for the
+    /// screen; never refreshes the ports (a live capture holds them).
+    static func screenProperties(device: NSObject, screenID: UInt32) -> NSObject? {
+        enumerationLock.lock()
+        defer { enumerationLock.unlock() }
+        guard let io = device.perform(NSSelectorFromString("io"))?
+            .takeUnretainedValue() as? NSObject
+        else { return nil }
+        let descSel = NSSelectorFromString("descriptor")
+        let propsSel = NSSelectorFromString("screenProperties")
+        let idSel = NSSelectorFromString("screenID")
+        typealias ReadID = @convention(c) (AnyObject, Selector) -> UInt32
+        for port in framebufferPorts(on: io) {
+            guard port.responds(to: descSel),
+                  let desc = port.perform(descSel)?.takeUnretainedValue() as? NSObject,
+                  desc.responds(to: propsSel),
+                  let props = desc.perform(propsSel)?.takeUnretainedValue() as? NSObject,
+                  props.responds(to: idSel), let idMethod = props.method(for: idSel)
+            else { continue }
+            if unsafeBitCast(idMethod, to: ReadID.self)(props, idSel) == screenID { return props }
+        }
+        return nil
+    }
+
     private static func framebufferPorts(on io: NSObject) -> [NSObject] {
         guard let ports = io.value(forKey: "deviceIOPorts") as? [NSObject] else {
             return []

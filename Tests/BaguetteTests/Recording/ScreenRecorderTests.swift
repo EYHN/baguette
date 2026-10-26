@@ -84,7 +84,7 @@ struct ScreenRecorderTests {
         let ticker = Ticker(readings)
 
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in
             if let startFailure { throw startFailure }
             captures.onFrame = onFrame
         }

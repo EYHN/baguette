@@ -24,9 +24,13 @@ struct DeviceChrome: Equatable, Sendable {
     /// 9-slice piece names (4 corners, 4 edges, 1 inner screen).
     /// Populated when `chrome.json` carries the full set; `nil` when
     /// any piece is missing. Bundles with a baked composite still
-    /// publish slice names, so the slice acts as a fallback path even
-    /// when `compositeImageName` is set.
+    /// publish slice names; the loader prefers those pieces because
+    /// DeviceKit can reuse one bundle across different screen sizes.
     let slice: DeviceChromeSlice?
+    /// Optional three-slice base shipped by the Apple TV chrome.
+    /// It is rendered below the device body without changing the
+    /// screen rectangle inside that body.
+    let stand: DeviceChromeStand?
     /// Margin to reserve around the rasterized composite when
     /// rendering the merged bezel — Apple's authoritative source of
     /// truth, sourced from `images.devicePadding` in chrome.json. The
@@ -44,6 +48,7 @@ struct DeviceChrome: Equatable, Sendable {
         buttons: [ChromeButton],
         compositeImageName: String?,
         slice: DeviceChromeSlice? = nil,
+        stand: DeviceChromeStand? = nil,
         devicePadding: Insets = Insets(top: 0, left: 0, bottom: 0, right: 0)
     ) {
         self.identifier = identifier
@@ -52,6 +57,7 @@ struct DeviceChrome: Equatable, Sendable {
         self.buttons = buttons
         self.compositeImageName = compositeImageName
         self.slice = slice
+        self.stand = stand
         self.devicePadding = devicePadding
     }
 
@@ -165,7 +171,49 @@ struct DeviceChrome: Equatable, Sendable {
             buttons: buttons,
             compositeImageName: images["composite"] as? String,
             slice: DeviceChromeSlice(json: images),
+            stand: (images["stand"] as? [String: Any])
+                .flatMap(DeviceChromeStand.init(json:)),
             devicePadding: devicePadding
+        )
+    }
+}
+
+struct DeviceChromeStand: Equatable, Sendable {
+    let width: Double
+    let height: Double
+    let left: String
+    let center: String
+    let right: String
+
+    init(
+        width: Double,
+        height: Double,
+        left: String,
+        center: String,
+        right: String
+    ) {
+        self.width = width
+        self.height = height
+        self.left = left
+        self.center = center
+        self.right = right
+    }
+
+    init?(json: [String: Any]) {
+        let width = coerceDouble(json["width"])
+        let height = coerceDouble(json["height"])
+        guard width > 0,
+              height > 0,
+              let left = json["left"] as? String,
+              let center = json["center"] as? String,
+              let right = json["right"] as? String
+        else { return nil }
+        self.init(
+            width: width,
+            height: height,
+            left: left,
+            center: center,
+            right: right
         )
     }
 }
@@ -247,7 +295,7 @@ struct ChromeButton: Equatable, Sendable {
         case left, right, top, bottom
     }
     enum Align: String, Sendable, Equatable {
-        case leading, trailing
+        case leading, center, trailing
     }
 
     let name: String
@@ -408,4 +456,3 @@ enum DeviceChromeParseError: Error, Equatable {
     case malformedJSON
     case missingIdentifier
 }
-

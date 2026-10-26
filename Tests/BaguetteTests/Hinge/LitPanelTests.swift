@@ -4,50 +4,58 @@ import Mockable
 @testable import Baguette
 
 /// Which of a simulator's panels the chrome, screen and tap space
-/// describe. On a foldable that is the hinge's call; everything else
-/// has one panel and never asks.
+/// describe. On a foldable that is Core Device's call — never the
+/// hinge angle's; everything else has one panel and never asks.
 @Suite("Simulator lit panel")
 struct LitPanelTests {
 
-    private func duo(angle: HingeAngle?) -> (MockSimulator, MockChromes) {
+    private func duo(lit: IntegratedPanel?) -> (MockSimulator, MockChromes) {
         let sim = MockSimulator()
         let chromes = MockChromes()
-        let hinge = MockHinge()
         given(sim).deviceTypeName.willReturn("iPhone Duo")
-        given(sim).hinge().willReturn(hinge)
-        given(hinge).angle().willReturn(angle)
+        given(sim).litPanel().willReturn(lit)
         given(chromes).panels(forDeviceName: .value("iPhone Duo")).willReturn([.primary, .secondary])
         return (sim, chromes)
     }
 
-    @Test func `should light the cover when folded`() {
-        let (sim, chromes) = duo(angle: HingeAngle(degrees: 3))
+    @Test func `the cover is lit when Core Device says so`() {
+        let (sim, chromes) = duo(lit: .primary)
         #expect(sim.litPanel(in: chromes) == .primary)
     }
 
-    @Test func `should light the unfolded panel when open`() {
-        let (sim, chromes) = duo(angle: HingeAngle(degrees: 130))
+    @Test func `the unfolded panel is lit when Core Device says so`() {
+        let (sim, chromes) = duo(lit: .secondary)
         #expect(sim.litPanel(in: chromes) == .secondary)
     }
 
-    /// No reading means as booted: folded.
-    @Test func `should light the cover when there is no hinge reading`() {
-        let (sim, chromes) = duo(angle: nil)
+    /// No answer means as booted: folded.
+    @Test func `without an answer the cover is lit`() {
+        let (sim, chromes) = duo(lit: nil)
         #expect(sim.litPanel(in: chromes) == .primary)
     }
 
-    /// The hinge read is a guest round-trip; a phone must not pay it.
-    @Test func `should never ask the hinge of a single-panel device`() {
+    /// The hinge angle is not what lights a panel: the runtime's pose
+    /// provider weighs speed and history, and an app may claim the
+    /// cover while open. It is not consulted at all.
+    @Test func `the hinge angle is never asked`() {
+        let (sim, chromes) = duo(lit: .secondary)
+        _ = sim.litPanel(in: chromes)
+        verify(sim).hinge().called(0)
+    }
+
+    /// Core Device's read is a devicectl round-trip; a phone must not pay it.
+    @Test func `a single-panel device never asks`() {
         let sim = MockSimulator()
         let chromes = MockChromes()
         given(sim).deviceTypeName.willReturn("iPhone 17 Pro")
         given(chromes).panels(forDeviceName: .any).willReturn([.primary])
         #expect(sim.litPanel(in: chromes) == .primary)
+        verify(sim).litPanel().called(0)
         verify(sim).hinge().called(0)
     }
 
-    @Test func `should show the lit panel's chrome`() {
-        let (sim, chromes) = duo(angle: HingeAngle(degrees: 130))
+    @Test func `the chrome is the lit panel's`() {
+        let (sim, chromes) = duo(lit: .secondary)
         let unfolded = DeviceChromeAssets(
             chrome: DeviceChrome(
                 identifier: "phone14",
@@ -62,40 +70,46 @@ struct LitPanelTests {
         #expect(sim.chrome(in: chromes)?.chrome.identifier == "phone14")
     }
 
-    /// The hinge's own answer, for callers that already know the device
-    /// folds: no reading means as booted, folded.
-    @Test func `should take a hinge with no reading as folded`() {
-        let hinge = MockHinge()
-        given(hinge).angle().willReturn(nil)
-        #expect(hinge.litPanel == .primary)
-    }
-
-    @Test func `should light the unfolded panel when the hinge is open`() {
-        let hinge = MockHinge()
-        given(hinge).angle().willReturn(HingeAngle(degrees: 130))
-        #expect(hinge.litPanel == .secondary)
-    }
-
     /// The page's 3D socket stays open across a fold, so the input it
-    /// is given follows the hinge rather than binding one panel.
+    /// is given follows the lit panel rather than binding one.
     @Test func `should give a foldable an input that follows the fold`() {
         let sim = MockSimulator()
         let displays = MockDisplays()
         let cover = MockDisplay(), unfolded = MockDisplay()
         let coverInput = MockInput(), unfoldedInput = MockInput()
-        let hinge = MockHinge()
         given(sim).displays().willReturn(displays)
-        given(sim).hinge().willReturn(hinge)
+        given(sim).litPanel().willReturn(.secondary)
         given(displays).panel(.value(.primary)).willReturn(cover)
         given(displays).panel(.value(.secondary)).willReturn(unfolded)
         given(cover).input().willReturn(coverInput)
         given(unfolded).input().willReturn(unfoldedInput)
-        given(hinge).angle().willReturn(HingeAngle(degrees: 130))
         given(unfoldedInput).tap(at: .any, size: .any, duration: .any, edge: .any).willReturn(true)
 
         #expect(sim.litPanelInput().tap(
             at: Point(x: 1, y: 2), size: Size(width: 669, height: 951), duration: 0.05, edge: nil))
         verify(unfoldedInput).tap(at: .any, size: .any, duration: .any, edge: .any).called(1)
         verify(coverInput).tap(at: .any, size: .any, duration: .any, edge: .any).called(0)
+    }
+}
+
+/// The panels of a device type, by the names Connected Screens gives
+/// them: capabilities order, the first being the one every device has.
+@Suite("DisplayPanels ↔ IntegratedPanel")
+struct DisplayPanelNamingTests {
+    private let cover = DisplayPanel(screenID: 1, pixelSize: CGSize(width: 1398, height: 2034), scale: 3, nativeRotation: 0)
+    private let inner = DisplayPanel(screenID: 3, pixelSize: CGSize(width: 2007, height: 2853), scale: 3, nativeRotation: 270)
+
+    @Test func `the first panel is primary and the second is the unfolded one`() {
+        let panels = DisplayPanels(panels: [cover, inner])
+        #expect(panels.integratedPanel(cover) == .primary)
+        #expect(panels.integratedPanel(inner) == .secondary)
+        #expect(panels.panel(.primary) == cover)
+        #expect(panels.panel(.secondary) == inner)
+    }
+
+    @Test func `a phone has no unfolded panel`() {
+        let panels = DisplayPanels(panels: [cover])
+        #expect(panels.panel(.secondary) == nil)
+        #expect(panels.integratedPanel(inner) == nil)
     }
 }

@@ -1,70 +1,43 @@
+import Darwin
 import Foundation
 
-/// Production `Subprocess` — wraps a `Foundation.Process` plus a
-/// stdout/stderr `Pipe`. The only Infrastructure code in the logs
-/// path that touches the real OS spawn pipeline. Integration-only
+/// Production `Subprocess` — wraps the small POSIX host-process launcher.
+/// The only Infrastructure code in the logs path that touches the real OS
+/// spawn pipeline. Integration-only
 /// (manually smoke-tested via `baguette logs` against a booted
 /// simulator); the orchestrator's behaviour is unit-covered
 /// against `MockSubprocess`.
 ///
-/// Single-shot — one `run(...)` call per instance. Re-running
-/// would risk leaking the previous Process / Pipe.
+/// Single-shot — one `run(...)` call per instance.
 final class HostSubprocess: Subprocess, @unchecked Sendable {
     private let lock = NSLock()
-    private var process: Process?
-    private var pipe: Pipe?
+    private var pid: pid_t?
+    /// The child's stdin, for a child started with `runInteractive`.
+    private var input: FileHandle?
+    /// Whether the reader is still draining the child's output.
+    private var reading = false
 
     init() {}
 
     deinit {
-        if let process, process.isRunning { process.terminate() }
-        try? pipe?.fileHandleForReading.close()
-        try? pipe?.fileHandleForWriting.close()
-        try? stdinPipe?.fileHandleForWriting.close()
+        terminate()
+        closeInput()
     }
 
     func run(
         executable: URL,
         arguments: [String],
         onBytes: @escaping @Sendable (Data) -> Void,
-        onExit:  @escaping @Sendable (Int32) -> Void
+        onExit: @escaping @Sendable (Int32) -> Void
     ) throws {
-        // Detach from any controlling terminal. Without this a
-        // SIGINT handed to the parent (Ctrl-C in `baguette logs`)
-        // would also kill the child via the foreground pgid
-        // before the parent's own SIGTERM handler runs.
-        try run(
-            executable: executable, arguments: arguments,
-            standardInput: FileHandle.nullDevice, stdinData: nil,
+        // No stdin payload: the child gets /dev/null, detaching it from any
+        // controlling terminal so a SIGINT handed to the parent (Ctrl-C in
+        // `baguette logs`) doesn't also kill the child via the foreground
+        // pgid before the parent's own SIGTERM handler runs.
+        try start(
+            child: HostProcess.spawn(executable: executable, arguments: arguments, stdin: nil),
             onBytes: onBytes, onExit: onExit
         )
-    }
-
-    private var stdinPipe: Pipe?
-
-    func runInteractive(
-        executable: URL,
-        arguments: [String],
-        onBytes: @escaping @Sendable (Data) -> Void,
-        onExit:  @escaping @Sendable (Int32) -> Void
-    ) throws {
-        let stdin = Pipe()
-        lock.lock()
-        stdinPipe = stdin
-        lock.unlock()
-        try run(
-            executable: executable, arguments: arguments,
-            standardInput: stdin, stdinData: nil,
-            onBytes: onBytes, onExit: onExit
-        )
-    }
-
-    func write(_ data: Data) throws {
-        lock.lock()
-        let pipe = stdinPipe
-        lock.unlock()
-        guard let pipe else { throw SubprocessError.notInteractive }
-        try pipe.fileHandleForWriting.write(contentsOf: data)
     }
 
     func run(
@@ -72,13 +45,12 @@ final class HostSubprocess: Subprocess, @unchecked Sendable {
         arguments: [String],
         stdin: Data,
         onBytes: @escaping @Sendable (Data) -> Void,
-        onExit:  @escaping @Sendable (Int32) -> Void
+        onExit: @escaping @Sendable (Int32) -> Void
     ) throws {
         // A pipe has no controlling tty, so the SIGINT detachment
         // concern of the no-stdin variant doesn't apply here.
-        try run(
-            executable: executable, arguments: arguments,
-            standardInput: Pipe(), stdinData: stdin,
+        try start(
+            child: HostProcess.spawn(executable: executable, arguments: arguments, stdin: stdin),
             onBytes: onBytes, onExit: onExit
         )
     }
@@ -90,73 +62,42 @@ final class HostSubprocess: Subprocess, @unchecked Sendable {
         environment: [String: String],
         stdin: Data,
         onBytes: @escaping @Sendable (Data) -> Void,
-        onExit:  @escaping @Sendable (Int32) -> Void
+        onExit: @escaping @Sendable (Int32) -> Void
     ) throws {
-        try run(
-            executable: executable, arguments: arguments,
-            standardInput: Pipe(), stdinData: stdin,
-            workingDirectory: workingDirectory, environment: environment,
+        // A caller-supplied environment replaces the parent's rather
+        // than merging into it — see the `Subprocess` doc comment.
+        try start(
+            child: HostProcess.spawn(
+                executable: executable, arguments: arguments, stdin: stdin,
+                workingDirectory: workingDirectory, environment: environment
+            ),
             onBytes: onBytes, onExit: onExit
         )
     }
 
-    private func run(
+    func runInteractive(
         executable: URL,
         arguments: [String],
-        standardInput: Any,
-        stdinData: Data?,
-        workingDirectory: URL? = nil,
-        environment: [String: String]? = nil,
         onBytes: @escaping @Sendable (Data) -> Void,
-        onExit:  @escaping @Sendable (Int32) -> Void
+        onExit: @escaping @Sendable (Int32) -> Void
     ) throws {
-        let pipe = Pipe()
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.standardOutput = pipe
-        process.standardError  = pipe
-        process.standardInput  = standardInput
-        // A caller-supplied environment replaces the parent's rather
-        // than merging into it — see the `Subprocess` doc comment.
-        process.environment = environment ?? ProcessInfo.processInfo.environment
-        if let workingDirectory { process.currentDirectoryURL = workingDirectory }
+        // The child's stdin stays open for `write(_:)` until the owner
+        // lets go of it (or the child exits); closing it delivers EOF.
+        try start(
+            child: HostProcess.spawn(
+                executable: executable, arguments: arguments,
+                stdin: .interactive, workingDirectory: nil, environment: nil
+            ),
+            onBytes: onBytes, onExit: onExit
+        )
+    }
 
-        pipe.fileHandleForReading.readabilityHandler = { handle in
-            let bytes = handle.availableData
-            if bytes.isEmpty {
-                // End of file. Foundation keeps invoking the handler with
-                // nothing for as long as one is installed — a busy loop
-                // that pinned `serve` at 100% once children that exit on
-                // their own (one-shot `simctl`, a `devicectl` monitor's
-                // timeout) had long-lived owners. The exit itself still
-                // arrives through `terminationHandler`.
-                handle.readabilityHandler = nil
-                return
-            }
-            onBytes(bytes)
-        }
-        process.terminationHandler = { proc in
-            onExit(proc.terminationStatus)
-        }
-
+    func write(_ data: Data) throws {
         lock.lock()
-        self.pipe = pipe
-        self.process = process
+        let input = self.input
         lock.unlock()
-
-        try process.run()
-
-        // Feed stdin off the calling thread — a payload past the
-        // 64 KB pipe buffer would otherwise block here until the
-        // child drains it. Closing the handle delivers EOF.
-        if let stdinData, let stdinPipe = standardInput as? Pipe {
-            DispatchQueue.global(qos: .userInitiated).async {
-                let handle = stdinPipe.fileHandleForWriting
-                try? handle.write(contentsOf: stdinData)
-                try? handle.close()
-            }
-        }
+        guard let input else { throw SubprocessError.notInteractive }
+        try input.write(contentsOf: data)
     }
 
     /// Whether the child's output is still being read — false once the
@@ -164,36 +105,82 @@ final class HostSubprocess: Subprocess, @unchecked Sendable {
     var isReading: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return pipe?.fileHandleForReading.readabilityHandler != nil
+        return reading
+    }
+
+    private func start(
+        child: HostProcess.Child,
+        onBytes: @escaping @Sendable (Data) -> Void,
+        onExit: @escaping @Sendable (Int32) -> Void
+    ) {
+        lock.lock()
+        pid = child.pid
+        input = child.input
+        reading = true
+        lock.unlock()
+
+        let readerQueue = DispatchQueue(label: "baguette.host-subprocess.\(child.pid)")
+        readerQueue.async { [self] in
+            while true {
+                let bytes = child.output.availableData
+                guard !bytes.isEmpty else { break }
+                onBytes(bytes)
+            }
+            lock.lock()
+            reading = false
+            lock.unlock()
+        }
+        DispatchQueue.global().async { [self] in
+            let status = HostProcess.wait(for: child.pid)
+            didExit(pid: child.pid)
+            readerQueue.async {
+                try? child.output.close()
+                onExit(status)
+            }
+        }
     }
 
     func terminate() {
-        lock.lock()
-        let proc = self.process
-        let pipe = self.pipe
-        lock.unlock()
-        if let proc, proc.isRunning { proc.terminate() }
-        closePipe(pipe)
+        send(SIGTERM)
     }
 
     func kill() {
-        lock.lock()
-        let proc = self.process
-        let pipe = self.pipe
-        lock.unlock()
-        // `Process` offers no SIGKILL of its own: `terminate()` sends
-        // SIGTERM and `interrupt()` sends SIGINT, and a child is free
-        // to trap either. Signalling the pid directly is the only way
-        // to guarantee `terminationHandler` — and so `onExit` — fires.
-        if let proc, proc.isRunning {
-            Darwin.kill(proc.processIdentifier, SIGKILL)
-        }
-        closePipe(pipe)
+        // `terminate()` is a request a child may trap or outlive; SIGKILL
+        // is the escalation that guarantees the waitpid watcher — and so
+        // `onExit` — fires. The pid stays owned until `didExit` reaps it,
+        // so a kill() after terminate() still reaches the child.
+        send(SIGKILL)
     }
 
-    private func closePipe(_ pipe: Pipe?) {
-        pipe?.fileHandleForReading.readabilityHandler = nil
-        try? pipe?.fileHandleForReading.close()
-        try? pipe?.fileHandleForWriting.close()
+    private func send(_ signal: Int32) {
+        lock.lock()
+        let pid = self.pid
+        lock.unlock()
+        // Signal only — never close `output` here. The reader queue may be
+        // blocked in `availableData`, and closing the descriptor under it
+        // raises NSFileHandleOperationException instead of delivering EOF.
+        // The child's death closes the pipe's write end, which ends the
+        // reader naturally; the watcher then closes the handle after
+        // `onExit`.
+        if let pid {
+            Darwin.kill(pid, signal)
+        }
+    }
+
+    private func didExit(pid: pid_t) {
+        lock.lock()
+        if self.pid == pid {
+            self.pid = nil
+        }
+        lock.unlock()
+        closeInput()
+    }
+
+    private func closeInput() {
+        lock.lock()
+        let input = self.input
+        self.input = nil
+        lock.unlock()
+        try? input?.close()
     }
 }

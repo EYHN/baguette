@@ -26,23 +26,4 @@ struct HingeAngleTests {
             #expect(HingeAngle.parse(hingeControlLine: line) == nil, "\(line)")
         }
     }
-
-    // MARK: - lit panel
-
-    @Test func `should light the cover when closed`() {
-        #expect(HingeAngle(degrees: 0).litPanel == .primary)
-        #expect(HingeAngle(degrees: 3.2).litPanel == .primary)
-        #expect(HingeAngle(degrees: 60).litPanel == .primary)
-    }
-
-    @Test func `should light the unfolded panel when open`() {
-        #expect(HingeAngle(degrees: 180).litPanel == .secondary)
-        #expect(HingeAngle(degrees: 130).litPanel == .secondary)
-        #expect(HingeAngle(degrees: 90).litPanel == .secondary)
-    }
-
-    @Test func `should swap panels where SpringBoard's partially-open region begins`() {
-        #expect(HingeAngle(degrees: HingeAngle.openBoundaryDegrees).litPanel == .secondary)
-        #expect(HingeAngle(degrees: HingeAngle.openBoundaryDegrees - 1).litPanel == .primary)
-    }
 }

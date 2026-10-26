@@ -20,7 +20,10 @@ import CoreGraphics
 ///      (`AXFrontmostRead`): on iOS 26.5 its frontmost request can answer
 ///      empty, and a freshly launched app shows it an empty tree until a
 ///      guest accessibility client has connected. Point queries always
-///      use the guest process.
+///      use the guest process. An embedding without the resource bundle
+///      (no HingeControl) has only the bridge: where the guest would be
+///      asked, it takes the bridge's `frontmostApplicationWithDisplayId:`
+///      translation instead of failing the query.
 ///   2. Request that application's translation from the SimDevice
 ///      directly (`TokenDispatcher.application(pid:…)`).
 ///   3. Generate a fresh UUID token; register it → SimDevice in the
@@ -129,19 +132,29 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
         // A long-lived session already knows its panel, so only the first
         // read pays for listing the connected screens.
         let geometry = try recheckGeometry()
-        return try AXFrontmostRead.read(
-            bridge: { Self.bridgeFrontmostPID(device: device) },
-            guest: { try frontmostPID(udid, deviceSetPath) },
-            tree: { pid, source in
-                try withAXPContext(known: (geometry, pid)) { ctx in
-                    let base = walkFrontmost(ctx)
-                    // An empty walk through the bridge is an app not yet
-                    // awake, so the guest route reads it again: sweeping
-                    // here would hide that behind the status bar's nodes.
-                    if source == .bridge, base.children.isEmpty { return base }
-                    return Self.supportsServerSideHitTest ? hitTestSweep(base: base, ctx: ctx) : base
-                }
-            })
+        do {
+            return try AXFrontmostRead.read(
+                bridge: { Self.bridgeFrontmostPID(device: device) },
+                guest: { try frontmostPID(udid, deviceSetPath) },
+                tree: { pid, source in
+                    try withAXPContext(known: (geometry, pid)) { ctx in
+                        let base = walkFrontmost(ctx)
+                        // An empty walk through the bridge is an app not yet
+                        // awake, so the guest route reads it again: sweeping
+                        // here would hide that behind the status bar's nodes.
+                        if source == .bridge, base.children.isEmpty { return base }
+                        return Self.supportsServerSideHitTest ? hitTestSweep(base: base, ctx: ctx) : base
+                    }
+                })
+        } catch GuestFrontmost.Failure.toolMissing {
+            // No guest helper to wake the app or name it (a library
+            // embedding without the resource bundle): the bridge's own
+            // frontmost translation is all there is, so read that.
+            return try withAXPContext(known: (geometry, nil)) { ctx in
+                let base = walkFrontmost(ctx)
+                return Self.supportsServerSideHitTest ? hitTestSweep(base: base, ctx: ctx) : base
+            }
+        }
     }
 
     func glance() throws -> AXNode? {
@@ -152,14 +165,21 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
     }
 
     func wake() throws {
-        _ = try frontmostPID(udid, deviceSetPath)
+        _ = try guestFrontmostPID()
+    }
+
+    /// The guest's frontmost PID, or `nil` in an embedding that ships no
+    /// `HingeControl` to ask — the bridge's own frontmost translation
+    /// stands in for it (`withAXPSession`).
+    private func guestFrontmostPID() throws -> Int32? {
+        do { return try frontmostPID(udid, deviceSetPath) } catch GuestFrontmost.Failure.toolMissing { return nil }
     }
 
     func press(_ node: AXNode) throws -> Bool {
         guard Self.isAvailable, let device = resolveDevice() else { return false }
         let geometry = try recheckGeometry()
         let bridged = Self.bridgeFrontmostPID(device: device).flatMap { $0 > 0 ? $0 : nil }
-        let pid = try bridged ?? frontmostPID(udid, deviceSetPath)
+        let pid = try bridged ?? guestFrontmostPID()
         var pressed = false
         _ = try withAXPContext(known: (geometry, pid)) { ctx in
             Self.stampElementTranslation(token: ctx.token, on: ctx.frontmostRoot)
@@ -242,6 +262,85 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
 
     // MARK: - tree fetch
 
+    /// Retain the exact native element; never retry a failed action.
+    func adjust(request: String) throws -> String {
+        guard let args = try JSONSerialization.jsonObject(with: Data(request.utf8)) as? [String: Any],
+              let expected = args["element"] as? [String: Any],
+              let frame = expected["frame"] as? [String: Double],
+              let x = frame["x"], let y = frame["y"],
+              let width = frame["width"], let height = frame["height"],
+              let number = args["steps"] as? NSNumber,
+              number.doubleValue == Double(number.int32Value), number.int32Value != 0,
+              [x, y, width, height].allSatisfy({ $0.isFinite }), width > 0, height > 0 else {
+            throw BaguetteCoreError.invalidArgument("adjust needs an element and a nonzero signed 32-bit step count")
+        }
+        let steps = Int(number.int32Value)
+        guard let result: String = try withAXPSession({ ctx in
+            let point = ctx.transform.unmap(CGPoint(x: x + width / 2, y: y + height / 2))
+            guard let translation = Self.objectAtPoint(translator: ctx.translator, point: point, displayId: 0, token: ctx.token) else { return nil }
+            Self.stamp(token: ctx.token, on: translation)
+            guard let element = Self.macPlatformElement(translator: ctx.translator, translation: translation) else { return nil }
+            Self.stampElementTranslation(token: ctx.token, on: element)
+            func snapshot() -> AXNode {
+                AXNode.walk(from: element, transform: ctx.transform, depthCap: 0, deadline: ctx.deadline, device: udid)
+            }
+            let before = snapshot()
+            if let expectedID = expected["nodeId"] as? String, before.nodeId != expectedID {
+                throw BaguetteCoreError.invalidArgument("stale_node: target identity changed; describe UI again")
+            }
+            let actualFrame = [before.frame.origin.x, before.frame.origin.y, before.frame.size.width, before.frame.size.height]
+            guard zip(actualFrame, [x, y, width, height]).allSatisfy({ abs($0 - $1) < 0.01 }),
+                  before.role == (expected["role"] as? String),
+                  before.identifier == (expected["identifier"] as? String),
+                  (before.label ?? before.title) == (expected["label"] as? String),
+                  before.value == (expected["value"] as? String),
+                  before.enabled, !before.hidden else {
+                throw BaguetteCoreError.invalidArgument("adjust target changed, is disabled, or is hidden; describe UI again")
+            }
+            let action = steps > 0 ? "AXIncrement" : "AXDecrement"
+            guard before.adjustmentActions.contains(action) else {
+                throw BaguetteCoreError.invalidArgument("element does not advertise \(action)")
+            }
+            var completed = 0
+            var failure: String?
+            var after = before
+            for _ in 0..<abs(steps) {
+                guard Date() < ctx.deadline else { failure = "adjust deadline exceeded"; break }
+                guard AXElementReader.bool(element, "isAccessibilityEnabled", default: true),
+                      !AXElementReader.bool(element, "isAccessibilityHidden", default: false) else {
+                    failure = "element became disabled or hidden"; break
+                }
+                guard Date() < ctx.deadline else { failure = "adjust deadline exceeded"; break }
+                guard AXElementReader.adjust(element, increment: steps > 0, deadline: ctx.deadline) else {
+                    failure = "action rejected or outcome unknown; not retried"; break
+                }
+                completed += 1
+                let prior = after.value
+                let settle = min(ctx.deadline, Date().addingTimeInterval(0.5))
+                repeat {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    after = snapshot()
+                } while after.value == prior && Date() < settle
+                if after.role != before.role || after.identifier != before.identifier || after.value == nil || Date() >= ctx.deadline {
+                    failure = "readback unavailable, target changed, or deadline exceeded; outcome unknown, not retried"
+                    break
+                }
+                if after.value == prior {
+                    failure = "action dispatched but value unchanged (boundary or unobservable update); stopped without retry"
+                    break
+                }
+            }
+            let output: [String: Any] = [
+                "ok": failure == nil, "requestedSteps": steps,
+                "completedActions": completed, "before": try JSONSerialization.jsonObject(with: Data(before.json.utf8)),
+                "after": try JSONSerialization.jsonObject(with: Data(after.json.utf8)),
+                "error": failure as Any? ?? NSNull()
+            ]
+            return String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]), as: UTF8.self)
+        }) else { throw BaguetteCoreError.noAccessibilityData }
+        return result
+    }
+
     /// The pieces every AXP entry point needs: a working translator,
     /// a registered token, the frontmost app's root element, an
     /// `AXFrameTransform` for rotating UIKit points into native panel
@@ -254,6 +353,7 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
         let token: String
         let frontmostRoot: NSObject
         let transform: AXFrameTransform
+        let screen: AXScreen
         let deadline: Date
     }
 
@@ -267,9 +367,25 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
     /// the read, and when the guest frontmost query or the application
     /// lookup fails, because those name a cause the caller can act on.
     private func withAXPContext(
-        known: (geometry: DisplayGeometry, pid: Int32)? = nil,
+        known: (geometry: DisplayGeometry, pid: Int32?)? = nil,
         _ body: (AXPContext) throws -> AXNode?
     ) throws -> AXNode? {
+        var screen: AXScreen?
+        var result = try withAXPSession(known: known) { ctx -> AXNode? in
+            screen = ctx.screen
+            return try body(ctx)
+        }
+        result?.screen = screen
+        return result
+    }
+
+    /// `withAXPContext` for a body whose result is not a node (`adjust`
+    /// answers JSON): the same context, geometry check and token
+    /// lifecycle, with nothing to attach the screen to.
+    private func withAXPSession<T>(
+        known: (geometry: DisplayGeometry, pid: Int32?)? = nil,
+        _ body: (AXPContext) throws -> T?
+    ) throws -> T? {
         guard Self.isAvailable else {
             logErr("[ax] framework / dispatcher not available")
             return nil
@@ -279,10 +395,15 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
             return nil
         }
         let geometry = try known?.geometry ?? displayGeometry()
-        let pid = try known?.pid ?? frontmostPID(udid, deviceSetPath)
-        let translation = try Self.sharedDispatcher.application(
-            pid: pid, on: device, udid: udid, timeout: Self.xpcTimeoutSeconds
-        )
+        // A library embedding that ships without baguette's resource
+        // bundle has no HingeControl to ask; with no PID in hand it falls
+        // back to the bridge's frontmost request below.
+        var translation: NSObject?
+        if let pid = try known?.pid ?? guestFrontmostPID() {
+            translation = try Self.sharedDispatcher.application(
+                pid: pid, on: device, udid: udid, timeout: Self.xpcTimeoutSeconds
+            )
+        }
         // Discovery has its own bounded lifetime; the tree's deadline
         // starts once the root translation is in hand.
         let token = UUID().uuidString
@@ -292,6 +413,13 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
 
         guard let translator = Self.sharedTranslator else { return nil }
 
+        if translation == nil {
+            translation = Self.frontmostApplication(translator: translator, token: token)
+        }
+        guard let translation else {
+            log("[ax] no frontmost application for udid=\(udid)")
+            return nil
+        }
         Self.stamp(token: token, on: translation)
 
         guard let frontmostRoot = Self.macPlatformElement(
@@ -300,20 +428,28 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
             log("[ax] no mac platform element from translation")
             return nil
         }
-        let transform = AXFrameTransform(
+        // AXP may reuse a platform wrapper whose translation still carries
+        // the previous request's expired token. Bind it before anything
+        // reads the root, not just before walking its children.
+        Self.stampElementTranslation(token: token, on: frontmostRoot)
+        let transform = AXFrameTransform.presenting(
+            rootFrame: AXElementReader.frame(of: frontmostRoot),
             pointSize: CGSize(width: geometry.width, height: geometry.height),
             orientation: geometry.orientation
         )
+        if ProcessInfo.processInfo.environment["SIMKIT_AX_DEBUG"] == "1" {
+            log("[ax] geometry \(geometry)")
+        }
 
-        var result = try body(AXPContext(
+        let result = try body(AXPContext(
             translator: translator,
             token: token,
             frontmostRoot: frontmostRoot,
             transform: transform,
+            screen: geometry,
             deadline: deadline
         ))
         try Self.requireUnchanged(geometry, try recheckGeometry())
-        result?.screen = geometry
         return result
     }
 
@@ -357,6 +493,7 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
 
     private func fetchTree(hitTest: Point?) throws -> AXNode? {
         try withAXPContext { ctx in
+
             // Only `describeAll` augments the walk with the sweep; the
             // `describeAt` fallback just needs the raw tree.
             walkFrontmost(ctx)
@@ -365,12 +502,13 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
 
     private func walkFrontmost(_ ctx: AXPContext) -> AXNode {
         Self.stampElementTranslation(token: ctx.token, on: ctx.frontmostRoot)
-        Self.stampSubtree(ctx.frontmostRoot, token: ctx.token, depthCap: Self.maxDepth)
         return AXNode.walk(
             from: ctx.frontmostRoot,
             transform: ctx.transform,
             depthCap: Self.maxDepth,
-            deadline: ctx.deadline
+            deadline: ctx.deadline,
+            device: udid,
+            prepare: { Self.stampElementTranslation(token: ctx.token, on: $0) }
         )
     }
 
@@ -450,15 +588,14 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
         Self.stampElementTranslation(token: ctx.token, on: hitElement)
         // Only stamp the subtree when we'll actually walk it — a
         // shallow (depth 0) sweep hit reads no children.
-        if depthCap > 0 {
-            Self.stampSubtree(hitElement, token: ctx.token, depthCap: depthCap)
-        }
 
         return AXNode.walk(
             from: hitElement,
             transform: ctx.transform,
             depthCap: depthCap,
-            deadline: ctx.deadline
+            deadline: ctx.deadline,
+            device: udid,
+            prepare: { Self.stampElementTranslation(token: ctx.token, on: $0) }
         )
     }
 
@@ -534,6 +671,19 @@ final class AXPTranslatorAccessibility: Accessibility, @unchecked Sendable {
     nonisolated(unsafe) static let sharedDispatcher = TokenDispatcher()
 
     // MARK: - AXPTranslator entry points
+
+    private static func frontmostApplication(
+        translator: NSObject, token: String
+    ) -> NSObject? {
+        let sel = NSSelectorFromString("frontmostApplicationWithDisplayId:bridgeDelegateToken:")
+        guard translator.responds(to: sel),
+              let imp = class_getMethodImplementation(type(of: translator), sel) else {
+            logErr("[ax] -frontmostApplicationWithDisplayId:bridgeDelegateToken: not found")
+            return nil
+        }
+        typealias Fn = @convention(c) (AnyObject, Selector, UInt32, AnyObject) -> AnyObject?
+        return unsafeBitCast(imp, to: Fn.self)(translator, sel, 0, token as NSString) as? NSObject
+    }
 
     private static func macPlatformElement(
         translator: NSObject, translation: NSObject

@@ -47,15 +47,6 @@ struct GuestHingeTests {
         return (hinge, sub, captures)
     }
 
-    /// Sweeps are played through `SharedHinge`'s motor; the reader
-    /// hears only the guest's samples.
-    @Test func `should hear of no sweeps, since it only reads`() {
-        let (hinge, sub, _) = makeHinge { _ in }
-        let watch = hinge.watchSweeps { _ in Issue.record("a reader heard a sweep") }
-        watch.cancel()
-        verify(sub).run(executable: .any, arguments: .any, onBytes: .any, onExit: .any).called(0)
-    }
-
     @Test func `should read this device's hinge with HingeControl in the guest`() {
         let (hinge, _, captures) = makeHinge { c in c.onBytes?(Data(self.sample.utf8)) }
         _ = hinge.angle()
@@ -137,10 +128,19 @@ struct GuestHingeTests {
 
     // MARK: - watch
 
+    /// Sweeps are played through `SharedHinge`'s motor; the reader
+    /// hears only the guest's samples.
+    @Test func `should hear of no sweeps, since it only reads`() {
+        let (hinge, sub, _) = makeHinge { _ in }
+        let watch = hinge.watchSweeps { _ in Issue.record("a reader heard a sweep") }
+        watch.cancel()
+        verify(sub).run(executable: .any, arguments: .any, onBytes: .any, onExit: .any).called(0)
+    }
+
     /// Device Hub animates a pose change as a 0.5–0.85 s sweep of
     /// samples at 60 Hz (measured: 3.8° → 130° in 0.84 s, ease-out).
     /// A watch hands every sample on, in order, for as long as it runs.
-    @Test func `should deliver every sample of a watch in order`() {
+    @Test func `a watch delivers every sample in order`() {
         final class Seen: @unchecked Sendable { var angles: [Double] = [] }
         let seen = Seen()
         let (hinge, _, captures) = makeHinge { _ in }
@@ -167,7 +167,7 @@ struct GuestHingeTests {
 
     /// Nothing after cancel: a sample the pipe still had buffered must
     /// not reach a caller that has moved on.
-    @Test func `should drop late samples when the watch is cancelled`() {
+    @Test func `a cancelled watch drops late samples`() {
         final class Seen: @unchecked Sendable { var count = 0 }
         let seen = Seen()
         let (hinge, _, captures) = makeHinge { _ in }
@@ -177,7 +177,7 @@ struct GuestHingeTests {
         #expect(seen.count == 0)
     }
 
-    @Test func `should deliver nothing when watching a device without a hinge`() {
+    @Test func `a watch on a device without a hinge delivers nothing`() {
         final class Seen: @unchecked Sendable { var count = 0 }
         let seen = Seen()
         let (hinge, _, captures) = makeHinge { _ in }
@@ -188,10 +188,58 @@ struct GuestHingeTests {
         watch.cancel()
     }
 
+    /// The monitor is a child that can be killed or run out its timeout;
+    /// its watcher hears that it is gone, so it can start another.
+    @Test func `a monitor that exits on its own ends the watch, once`() {
+        final class Ends: @unchecked Sendable { var count = 0 }
+        let ends = Ends()
+        let (hinge, _, captures) = makeHinge { _ in }
+        let watch = hinge.watch(onAngle: { _ in }, onEnd: { ends.count += 1 })
+        captures.onBytes?(Data(sample.utf8))
+        captures.onExit?(137)
+        #expect(ends.count == 1)
+        // Cancelling what has already ended is quiet, and vice versa.
+        watch.cancel()
+        #expect(ends.count == 1)
+    }
+
+    @Test func `a watch that was cancelled does not report its own end`() {
+        final class Ends: @unchecked Sendable { var count = 0 }
+        let ends = Ends()
+        let (hinge, _, captures) = makeHinge { _ in }
+        let watch = hinge.watch(onAngle: { _ in }, onEnd: { ends.count += 1 })
+        watch.cancel()
+        captures.onExit?(15)
+        #expect(ends.count == 0)
+    }
+
     @Test func `should deliver nothing without spawning when watching without HingeControl`() {
         let (hinge, sub, _) = makeHinge(tool: nil) { _ in }
         let watch = hinge.watch { _ in Issue.record("no sample expected") }
         watch.cancel()
         verify(sub).run(executable: .any, arguments: .any, onBytes: .any, onExit: .any).called(0)
+    }
+}
+
+/// An embedder's own reader is spawned in place of `HingeControl`.
+@Suite("GuestHingeReader — the embedder names the reader", .serialized)
+struct GuestHingeReaderTests {
+    @Test func `should use the reader the embedder named`() throws {
+        let tool = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hinge-reader-\(UUID().uuidString)")
+        try Data("#!/bin/sh\n".utf8).write(to: tool)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        defer {
+            GuestHingeReader.use(tool: nil)
+            try? FileManager.default.removeItem(at: tool)
+        }
+        GuestHingeReader.use(tool: tool.path)
+        #expect(GuestHingeReader.tool() == tool.path)
+    }
+
+    @Test func `should ignore a named reader that is not there`() {
+        defer { GuestHingeReader.use(tool: nil) }
+        GuestHingeReader.use(tool: "/nonexistent/reader")
+        #expect(GuestHingeReader.tool() != "/nonexistent/reader")
     }
 }

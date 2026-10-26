@@ -29,7 +29,7 @@ final class GuestHinge: Hinge, @unchecked Sendable {
         udid: String,
         deviceSetPath: String? = nil,
         subprocess: @escaping () -> any Subprocess = { HostSubprocess() },
-        tool: @escaping () -> String? = { InjectedDylibInstaller.installIfNeeded(.hingeControl) },
+        tool: @escaping () -> String? = { GuestHingeReader.tool() },
         xcrun: URL = URL(fileURLWithPath: "/usr/bin/xcrun"),
         deadline: TimeInterval = 3
     ) {
@@ -103,7 +103,10 @@ final class GuestHinge: Hinge, @unchecked Sendable {
         func cancel() {}
     }
 
-    func watch(onAngle: @escaping @Sendable (HingeAngle) -> Void) -> any HingeWatch {
+    func watch(
+        onAngle: @escaping @Sendable (HingeAngle) -> Void,
+        onEnd: @escaping @Sendable () -> Void
+    ) -> any HingeWatch {
         let watch = Watch(child: subprocess())
         guard let arguments = arguments(verb: "watch-angle") else {
             watch.cancel()
@@ -120,10 +123,15 @@ final class GuestHinge: Hinge, @unchecked Sendable {
                         }
                     }
                 },
-                onExit: { _ in watch.cancel() }
+                // The monitor went away on its own — killed, crashed, or
+                // its day-long timeout ran out. Its consumer hears about
+                // it; one it cancelled itself is not news.
+                onExit: { _ in
+                    if watch.end() { onEnd() }
+                }
             )
         } catch {
-            watch.cancel()
+            if watch.end() { onEnd() }
         }
         return watch
     }
@@ -159,5 +167,43 @@ final class GuestHinge: Hinge, @unchecked Sendable {
             lock.unlock()
             if first { child.terminate() }
         }
+
+        /// The child is gone. True when this watch had not been cancelled,
+        /// so the end was the monitor's doing and the consumer should hear.
+        func end() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            let first = !cancelled
+            cancelled = true
+            return first
+        }
+    }
+}
+
+/// Which guest executable `GuestHinge` spawns for `read-angle` /
+/// `watch-angle`. An embedder that ships its own reader names it here
+/// (SimKit: its guest posture tool, which prints the same `angle <deg>`
+/// lines), so the hinge is read without shipping `HingeControl` — whose
+/// presence would also switch the keys and frontmost-app paths to it.
+/// Unnamed, `HingeControl` is used when the build carries it.
+public enum GuestHingeReader {
+    nonisolated(unsafe) private static var embedderTool: String?
+    private static let lock = NSLock()
+
+    /// Names the reader, or `nil` to go back to `HingeControl`. Call
+    /// before the first hinge is read; a monitor already running keeps
+    /// the tool it started with.
+    public static func use(tool path: String?) {
+        lock.lock()
+        embedderTool = path
+        lock.unlock()
+    }
+
+    static func tool() -> String? {
+        lock.lock()
+        let named = embedderTool
+        lock.unlock()
+        if let named, FileManager.default.isExecutableFile(atPath: named) { return named }
+        return InjectedDylibInstaller.installIfNeeded(.hingeControl)
     }
 }
