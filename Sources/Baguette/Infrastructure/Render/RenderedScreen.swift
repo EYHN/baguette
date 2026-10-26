@@ -36,16 +36,24 @@ final class RenderedScreen: DeviceFrames, @unchecked Sendable {
         try start { _ in }
     }
 
-    func start(onFrame: @escaping @Sendable (IOSurface) -> Void) throws {
+    func start(
+        onFrame: @escaping @Sendable (IOSurface) -> Void,
+        onMetadata: @escaping @Sendable (ScreenMetadata) -> Void
+    ) throws {
         lock.withLock {
             delivery = onFrame
             isStopped = false
         }
         pump?.start()
         do {
-            try source.start { [weak self] surface in
-                self?.enqueue(surface)
-            }
+            // Rendering decorates pixels only; the source's authoritative
+            // screen properties pass through untouched.
+            try source.start(
+                onFrame: { [weak self] surface in
+                    self?.enqueue(surface)
+                },
+                onMetadata: onMetadata
+            )
         } catch {
             lock.withLock {
                 delivery = nil

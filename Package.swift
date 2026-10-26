@@ -14,7 +14,12 @@ import PackageDescription
 // runtime dlopen path already handles every install location correctly.
 let package = Package(
     name: "Baguette",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v15), .macCatalyst("26.0")],
+    products: [
+        // SimKit links the library; the CLI is a thin `@main` over it.
+        .library(name: "BaguetteCore", targets: ["Baguette"]),
+        .executable(name: "baguette", targets: ["BaguetteCLI"]),
+    ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.1"),
         // `@Mockable` auto-generates `MockXxx` classes from `@Mockable`
@@ -25,7 +30,7 @@ let package = Package(
         .package(url: "https://github.com/hummingbird-project/hummingbird-websocket.git", from: "2.6.0"),
     ],
     targets: [
-        .executableTarget(
+        .target(
             name: "Baguette",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
@@ -76,6 +81,14 @@ let package = Package(
                 .linkedFramework("ImageIO"),
                 .linkedFramework("VideoToolbox"),
             ]
+        ),
+        .executableTarget(
+            name: "BaguetteCLI",
+            dependencies: [
+                "Baguette",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/BaguetteCLI"
         ),
         .testTarget(
             name: "BaguetteTests",

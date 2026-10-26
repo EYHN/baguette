@@ -55,7 +55,7 @@ struct DeviceFrameTests {
         let release = DispatchSemaphore(value: 0)
         var sourceDelivery: (@Sendable (IOSurface) -> Void)?
         let received = Frames()
-        given(source).start(onFrame: .any).willProduce { sourceDelivery = $0 }
+        given(source).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in sourceDelivery = onFrame }
         given(source).stop().willReturn()
         given(scene).renderFrame(screen: .any).willProduce { surface in
             let width = IOSurfaceGetWidth(surface)
@@ -103,20 +103,20 @@ struct DeviceFrameTests {
         let surface = try #require(RenderedScreenTests.surface(width: 3, height: 2))
         var sourceDelivery: (@Sendable (IOSurface) -> Void)?
         let received = Frames()
-        given(unfolded).start(onFrame: .any).willReturn()
-        given(cover).start(onFrame: .any).willProduce { sourceDelivery = $0 }
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willReturn()
+        given(cover).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in sourceDelivery = onFrame }
         given(unfolded).stop().willReturn()
         given(cover).stop().willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 0))
-        given(hinge).watch(onAngle: .any).willReturn(watch)
+        given(hinge).watch(onAngle: .any, onEnd: .any).willReturn(watch)
         given(watch).cancel().willReturn()
-        given(scene).update(hingeDegrees: .any).willReturn()
+        given(scene).update(hingeDegrees: .any, litPanel: .any).willReturn()
         let placement = DeviceFramePlacement(
             quad: nil, pieces: [], buttons: [], litPanel: .primary, hingeDegrees: 0,
             sourcePixelSize: .init(width: 3, height: 2), textureTransform: .identity
         )
         given(scene).renderFrame(screens: .any).willReturn(DeviceFrame(surface: surface, placement: placement))
-        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, scene: scene)
+        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, litPanel: { .primary }, scene: scene)
         try screen.startFrames { received.add($0) }
         defer { screen.stop() }
         sourceDelivery?(surface)

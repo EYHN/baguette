@@ -10,6 +10,10 @@ For releases prior to this changelog, see the
 
 ## [Unreleased]
 
+### Fixed
+- `baguette hinge` and `GET /simulators/:udid/hinge` read iPhone Duo's hinge again on Xcode 27.1's release build, in a custom `--device-set` and right after a fold, so streams, screenshots, taps, `describe-ui` and hinge messages follow the lit panel. → [docs](docs/features/hinge/README.md#gotchas)
+- `describe-ui` on an Apple Watch (or any device that never rotates) no longer fails with `unknown(0)`: SimulatorKit never sets those devices' interface orientation, and the unset value now reads as the unturned panel. An iPhone or iPad that has not reported its orientation yet says so in plain words.
+
 ---
 
 ## [0.2.3] - 2026-10-05

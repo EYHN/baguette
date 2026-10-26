@@ -1641,9 +1641,9 @@ struct Server: Sendable {
     ///
     /// `foldable` comes from the profile (does the device have a second
     /// panel), `angleDegrees` from the hinge — `null` when no reading
-    /// arrived, which on a foldable means "as booted" — and `litPanel`
-    /// is the one the chrome, screen and tap space currently describe.
-    /// A single-panel device's hinge is never consulted.
+    /// arrived — and `litPanel` is the one the chrome, screen and tap
+    /// space currently describe: Core Device's answer, not a reading of
+    /// the angle. A single-panel device's hinge is never consulted.
     static func hingeJSON(
         udid: String, simulators: any Simulators, chromes: any Chromes
     ) -> String? {
@@ -1651,7 +1651,7 @@ struct Server: Sendable {
         let foldable = chromes.panels(forDeviceName: sim.deviceTypeName).contains(.secondary)
         let angle = foldable ? sim.hinge().angle() : nil
         let degrees = angle.map { "\($0.degrees)" } ?? "null"
-        let lit = angle?.litPanel ?? .primary
+        let lit = sim.litPanel(in: chromes)
         // The guest turns the unfolded panel to landscape on its own, so
         // the page has to be told which way it faces; the binding of the
         // phone plane carries what Connected Screens reports.
@@ -2844,7 +2844,9 @@ struct Server: Sendable {
             let box = Box()
             let book = RenderedFoldable(
                 unfolded: unfolded.screen(), cover: cover.screen(),
-                hinge: sim.hinge(), scene: scene, fps: options.frameMetadata ? 20 : nil,
+                hinge: sim.hinge(),
+                litPanel: { sim.litPanel() ?? .primary },
+                scene: scene, fps: options.frameMetadata ? 20 : nil,
                 onPose: {
                     // The lit screen moved: tell the page where it is.
                     // Atomic frames carry the placement themselves.

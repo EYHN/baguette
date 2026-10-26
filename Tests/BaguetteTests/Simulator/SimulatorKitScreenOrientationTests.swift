@@ -24,6 +24,31 @@ struct SimulatorKitScreenOrientationTests {
         }
     }
 
+    @Test func `a device that never rotates reads its unset orientation as the unturned panel`() throws {
+        #expect(try SimulatorKitScreenOrientation.read(properties: ScreenProperties(0), rotates: false) == .portrait)
+    }
+
+    @Test(arguments: [UInt32(5), .max])
+    func `a device that never rotates still fails on an out-of-range orientation`(raw: UInt32) {
+        #expect(throws: SimulatorKitScreenOrientation.Failure.unknown(raw)) {
+            try SimulatorKitScreenOrientation.read(properties: ScreenProperties(raw), rotates: false)
+        }
+    }
+
+    @Test(arguments: [
+        ("iPhone", true), ("iPad", true),
+        ("Apple Watch", false), ("Apple TV", false), ("Apple Vision", false),
+    ])
+    func `only iPhone and iPad rotate`(family: String, rotates: Bool) {
+        #expect(SimulatorKitScreenOrientation.rotates(productFamily: family) == rotates)
+    }
+
+    @Test func `an unset orientation explains itself instead of naming the enum case`() {
+        let message = SimulatorKitScreenOrientation.Failure.unknown(0).localizedDescription
+        #expect(message.contains("has not reported its interface orientation"))
+        #expect(!message.contains("unknown(0)"))
+    }
+
     @Test func `missing screen properties fail explicitly`() {
         #expect(throws: SimulatorKitScreenOrientation.Failure.unavailable) {
             try SimulatorKitScreenOrientation.read(properties: NSObject())

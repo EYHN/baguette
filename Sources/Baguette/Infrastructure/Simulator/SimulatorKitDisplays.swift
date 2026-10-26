@@ -6,6 +6,7 @@ final class SimulatorKitDisplays: Displays, @unchecked Sendable {
     let phone: any Display
     let carPlay: any Display
     private let udid: String
+    private let deviceSetPath: String?
     private let host: any DeviceHost
     private let hinge: any Hinge
     private let keys: (any DeviceKeys)?
@@ -19,6 +20,7 @@ final class SimulatorKitDisplays: Displays, @unchecked Sendable {
     ) {
         let enumerateIO = { try SimctlCapture.enumerate(udid: udid, deviceSetPath: deviceSetPath) }
         self.udid = udid
+        self.deviceSetPath = deviceSetPath
         self.host = host
         self.hinge = hinge
         self.keys = keys
@@ -26,6 +28,7 @@ final class SimulatorKitDisplays: Displays, @unchecked Sendable {
         self.phone = SimulatorKitDisplay(
             kind: .phone,
             udid: udid,
+            deviceSetPath: deviceSetPath,
             host: host,
             enumerateIO: enumerateIO,
             hinge: hinge,
@@ -34,6 +37,7 @@ final class SimulatorKitDisplays: Displays, @unchecked Sendable {
         self.carPlay = SimulatorKitDisplay(
             kind: .carPlay,
             udid: udid,
+            deviceSetPath: deviceSetPath,
             host: host,
             enumerateIO: enumerateIO,
             hinge: hinge
@@ -44,6 +48,7 @@ final class SimulatorKitDisplays: Displays, @unchecked Sendable {
         SimulatorKitDisplay(
             kind: .phone,
             udid: udid,
+            deviceSetPath: deviceSetPath,
             host: host,
             enumerateIO: enumerateIO,
             hinge: hinge,
