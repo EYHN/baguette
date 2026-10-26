@@ -45,4 +45,24 @@ enum SimulatorKitFramework {
     ) -> String? {
         candidatePaths(developerDir: developerDir).first(where: exists)
     }
+
+    /// The major version of the Xcode whose SimulatorKit is in use, from
+    /// the `DTXcode` stamp in its Info.plist ("2700" is Xcode 27.0).
+    static func xcodeMajor(dtXcode: String?) -> Int? {
+        guard let dtXcode, let stamp = Int(dtXcode), stamp >= 100 else { return nil }
+        return stamp / 100
+    }
+
+    /// Read once: a process loads one SimulatorKit.
+    static let hostXcodeMajor: Int? = {
+        guard let binary = path(developerDir: CoreSimulators.developerDir()) else { return nil }
+        let framework = (binary as NSString).deletingLastPathComponent
+        for resources in ["Resources", "Versions/A/Resources"] {
+            let plist = "\(framework)/\(resources)/Info.plist"
+            if let info = NSDictionary(contentsOfFile: plist) {
+                return xcodeMajor(dtXcode: info["DTXcode"] as? String)
+            }
+        }
+        return nil
+    }()
 }

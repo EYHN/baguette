@@ -13,10 +13,18 @@ import IOSurface
 /// The book is posed where `PosedHinge` has it: at the hinge's readings,
 /// except while baguette plays a sweep, whose frames it steps through at
 /// 60 Hz as commanded however late the readings come back.
+///
+/// Which panel is lit is `litPanel`'s call (Core Device's, through
+/// `ActiveDisplays`), never the angle's. It is asked on every pose and
+/// before every composition — a cached read while the device is
+/// followed — so a panel that lights without the hinge moving (the pose
+/// provider taking its time, an app claiming the cover) re-poses the
+/// book on the next frame either panel delivers.
 final class RenderedFoldable: DeviceFrames, @unchecked Sendable {
     private let unfolded: any Screen
     private let cover: any Screen
     private let hinge: any Hinge
+    private let litPanel: @Sendable () -> IntegratedPanel
     private let scene: any DeviceScene
     private let lock = NSLock()
     private let queue = DispatchQueue(
@@ -45,6 +53,8 @@ final class RenderedFoldable: DeviceFrames, @unchecked Sendable {
     /// One pose at a time: a reading and a sweep's frame must reach the
     /// scene in the order they were decided.
     private let posing = NSLock()
+    /// The lit panel as last posed.
+    private var posedPanel: IntegratedPanel = .primary
 
     /// The pose the book is shown at.
     var pose: FoldablePose {
@@ -55,18 +65,22 @@ final class RenderedFoldable: DeviceFrames, @unchecked Sendable {
     /// Monotonic seconds; a sweep's frames are timed by it.
     private let now: @Sendable () -> TimeInterval
 
-    /// `onPose` runs after each new pose — a hinge sample, or a frame of
-    /// a sweep baguette plays — with the pose it now stands at, so a
+    /// `litPanel` says which panel the device presents on. `onPose` runs
+    /// after each new pose — a hinge sample, a frame of a sweep baguette
+    /// plays, or a panel change — with the pose it now stands at, so a
     /// listener never needs to hold the book to read it (that cycle kept
     /// a closed stream's scene alive).
     init(
-        unfolded: any Screen, cover: any Screen, hinge: any Hinge, scene: any DeviceScene,
+        unfolded: any Screen, cover: any Screen, hinge: any Hinge,
+        litPanel: @escaping @Sendable () -> IntegratedPanel,
+        scene: any DeviceScene,
         fps: Int? = nil, onPose: @escaping @Sendable (FoldablePose) -> Void = { _ in },
         now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
         self.unfolded = unfolded
         self.cover = cover
         self.hinge = hinge
+        self.litPanel = litPanel
         self.scene = scene
         self.fps = fps
         self.onPose = onPose
@@ -75,10 +89,13 @@ final class RenderedFoldable: DeviceFrames, @unchecked Sendable {
 
     func startFrames(onFrame: @escaping @Sendable (Result<DeviceFrame, any Error>) -> Void) throws {
         lock.withLock { frameDelivery = onFrame }
-        try start { _ in }
+        try start(onFrame: { _ in }, onMetadata: { _ in })
     }
 
-    func start(onFrame: @escaping @Sendable (IOSurface) -> Void) throws {
+    func start(
+        onFrame: @escaping @Sendable (IOSurface) -> Void,
+        onMetadata: @escaping @Sendable (ScreenMetadata) -> Void
+    ) throws {
         lock.withLock {
             delivery = onFrame
             isStopped = false
@@ -88,19 +105,34 @@ final class RenderedFoldable: DeviceFrames, @unchecked Sendable {
         // A silent hinge (the guest's motion stream can drop) still
         // gets a book: shut, as the device boots, until it speaks.
         let standing = hinge.angle()?.degrees ?? 0
+        let lit = litPanel()
         lock.withLock {
             hingeDegrees = standing
             posed = PosedHinge(reading: standing)
+            posedPanel = lit
             isPosed = true
         }
-        scene.update(hingeDegrees: standing)
+        scene.update(hingeDegrees: standing, litPanel: lit)
+        // Rendering decorates pixels only; the screen properties that
+        // pass through are the lit panel's — the one the guest drives.
+        let litPanel = self.litPanel
         do {
-            try unfolded.start { [weak self] surface in
-                self?.take { FoldableScreens(unfolded: surface, cover: $0.cover) }
-            }
-            try cover.start { [weak self] surface in
-                self?.take { FoldableScreens(unfolded: $0.unfolded, cover: surface) }
-            }
+            try unfolded.start(
+                onFrame: { [weak self] surface in
+                    self?.take { FoldableScreens(unfolded: surface, cover: $0.cover) }
+                },
+                onMetadata: { metadata in
+                    if litPanel() == .secondary { onMetadata(metadata) }
+                }
+            )
+            try cover.start(
+                onFrame: { [weak self] surface in
+                    self?.take { FoldableScreens(unfolded: $0.unfolded, cover: surface) }
+                },
+                onMetadata: { metadata in
+                    if litPanel() == .primary { onMetadata(metadata) }
+                }
+            )
         } catch {
             stop()
             throw error
@@ -152,24 +184,41 @@ final class RenderedFoldable: DeviceFrames, @unchecked Sendable {
         }
     }
 
-    /// Pose the book where `PosedHinge` has it now, after `change`, and
-    /// recompose — unless the book is already there.
+    /// Pose the book where `PosedHinge` has it now, after `change`, on
+    /// the panel the device presents on, and recompose — unless the book
+    /// is already there.
     private func repose(_ change: (inout PosedHinge) -> Void = { _ in }) {
+        let lit = litPanel()
         let moved: Bool = posing.withLock {
             let next = lock.withLock { () -> Double? in
                 guard !isStopped else { return nil }
                 change(&posed)
                 let degrees = posed.degrees(at: now())
-                guard degrees != hingeDegrees else { return nil }
+                guard degrees != hingeDegrees || lit != posedPanel else { return nil }
                 hingeDegrees = degrees
+                posedPanel = lit
                 return degrees
             }
             guard let next else { return false }
-            scene.update(hingeDegrees: next)
+            scene.update(hingeDegrees: next, litPanel: lit)
             onPose(FoldablePose(hingeDegrees: next))
             return true
         }
         if moved { refresh() }
+    }
+
+    /// The lit panel moved without the hinge (or Core Device answered
+    /// after the sweep): re-pose before the next composition.
+    private func followPanel() {
+        let lit = litPanel()
+        let repose: Double? = lock.withLock {
+            guard isPosed, lit != posedPanel else { return nil }
+            posedPanel = lit
+            return hingeDegrees
+        }
+        guard let degrees = repose else { return }
+        scene.update(hingeDegrees: degrees, litPanel: lit)
+        onPose(FoldablePose(hingeDegrees: degrees))
     }
 
     func stop() {
@@ -218,6 +267,7 @@ final class RenderedFoldable: DeviceFrames, @unchecked Sendable {
 
     private func render() {
         while true {
+            followPanel()
             let screens = lock.withLock { latest }
             do {
                 if lock.withLock({ frameDelivery != nil }) {

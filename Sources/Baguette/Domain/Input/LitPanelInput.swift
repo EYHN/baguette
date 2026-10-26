@@ -1,7 +1,7 @@
 import Foundation
 
 /// A foldable's input across folds: each gesture goes to the panel the
-/// hinge lights. iPhone Duo's page keeps one socket while the hinge
+/// device presents on (`litPanel`: Core Device's answer, not the angle's). iPhone Duo's page keeps one socket while the hinge
 /// moves (the book draws both panels), so an input bound once would
 /// keep addressing a panel that has gone dark.
 ///
@@ -12,29 +12,29 @@ import Foundation
 final class LitPanelInput: Input, @unchecked Sendable {
     private let cover: any Input
     private let unfolded: any Input
-    private let hinge: any Hinge
+    private let litPanel: @Sendable () -> IntegratedPanel
     private let lock = NSLock()
     /// The panel each contact stream went down on; a one-finger drag and
     /// a pinch can overlap, and each keeps its own digitizer.
     private enum Contact { case oneFinger, twoFingers }
     private var touching: [Contact: IntegratedPanel] = [:]
 
-    init(cover: any Input, unfolded: any Input, hinge: any Hinge) {
+    init(cover: any Input, unfolded: any Input, litPanel: @escaping @Sendable () -> IntegratedPanel) {
         self.cover = cover
         self.unfolded = unfolded
-        self.hinge = hinge
+        self.litPanel = litPanel
     }
 
     private func input(on panel: IntegratedPanel) -> any Input { panel == .primary ? cover : unfolded }
 
-    private var lit: any Input { input(on: hinge.litPanel) }
+    private var lit: any Input { input(on: litPanel()) }
 
     /// The panel a contact's phase goes to: the lit one on `down`, the
     /// same one until `up`.
     private func contact(_ stream: Contact, _ phase: GesturePhase) -> any Input {
         lock.lock()
         defer { lock.unlock() }
-        let panel = (phase == .down ? nil : touching[stream]) ?? hinge.litPanel
+        let panel = (phase == .down ? nil : touching[stream]) ?? litPanel()
         touching[stream] = phase == .up ? nil : panel
         return input(on: panel)
     }

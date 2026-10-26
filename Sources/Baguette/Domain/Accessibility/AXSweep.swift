@@ -17,6 +17,9 @@ enum AXSweep {
     struct Result: Equatable {
         var discovered: [AXNode] = []
         var probed = 0
+        /// How far each displaced process's frames are from the screen
+        /// (`AXRemoteFrames`); `discovered` is already moved by them.
+        var shifts: [String: AXRemoteFrames.Shift] = [:]
     }
 
     static func run(
@@ -31,6 +34,21 @@ enum AXSweep {
         var known = Set<String>()
         collectKeys(of: base, into: &known)
         var foundNew = false
+        var hits: [AXRemoteFrames.Hit] = []
+        // Another process's view inside the app reports frames from its own
+        // corner; the points that found its elements say where it stands.
+        func placed() -> Result {
+            var extra = 0
+            let shifts = AXRemoteFrames.shifts(
+                hits, app: base.process, statusStrip: statusStrip, keepGoing: keepGoing
+            ) { point in
+                extra += 1
+                return probe(point)
+            }
+            return Result(
+                discovered: result.discovered.map { $0.placed(by: shifts) },
+                probed: result.probed + extra, shifts: shifts)
+        }
 
         func look(at points: [Point]) {
             for point in points {
@@ -38,13 +56,14 @@ enum AXSweep {
                 result.probed += 1
                 guard let node = probe(point) else { continue }
                 result.discovered.append(node)
+                hits.append(AXRemoteFrames.Hit(point: point, node: node))
                 if node.saysSomething, known.insert(node.dedupKey).inserted { foundNew = true }
             }
         }
 
         if base.children.isEmpty {
             look(at: fine.samplePoints())
-            return result
+            return placed()
         }
 
         let regions = base.unseenRegions() + [statusStrip]
@@ -56,7 +75,12 @@ enum AXSweep {
         let described = base.contentLeafFrames() + regions
         look(at: scout.samplePoints(covered: described))
         if foundNew { look(at: fine.samplePoints(covered: described)) }
-        return result
+        // Another process's view in the walk (a share sheet, a document
+        // picker) names frames from its own corner, so the looks above took
+        // its elements' real places for ground the walk had covered and
+        // skipped them. One coarse pass over the whole screen finds them.
+        if base.hostsAnotherProcess { look(at: scout.samplePoints()) }
+        return placed()
     }
 
     private static func collectKeys(of node: AXNode, into keys: inout Set<String>) {
@@ -66,6 +90,16 @@ enum AXSweep {
 }
 
 extension AXNode {
+    /// Whether the walk reached elements of a process other than the root's.
+    fileprivate var hostsAnotherProcess: Bool {
+        guard let own = process else { return false }
+        func foreign(_ node: AXNode) -> Bool {
+            if let other = node.process, other != own { return true }
+            return node.children.contains(where: foreign)
+        }
+        return children.contains(where: foreign)
+    }
+
     /// A hit worth treating as a discovery; a bare container only says the
     /// point belongs to some group.
     fileprivate var saysSomething: Bool {

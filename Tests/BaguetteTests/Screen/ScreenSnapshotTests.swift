@@ -20,7 +20,7 @@ struct ScreenSnapshotTests {
     @Test func `should describe the capture geometry as the even scaled frame actually encoded`() async throws {
         let surface = try #require(makeSurface(width: 1206, height: 2622))
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in onFrame(surface) }
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in onFrame(surface) }
         given(screen).stop().willReturn(())
 
         let frame = try await ScreenSnapshot.captureWithGeometry(screen: screen, scale: 2, format: .png)
@@ -40,7 +40,7 @@ struct ScreenSnapshotTests {
     func `should describe exactly the letterbox, crop or stretch encoded into the capture`(fit: CaptureFit) async throws {
         let surface = try #require(makeSurface(width: 120, height: 60))
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in onFrame(surface) }
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in onFrame(surface) }
         given(screen).stop().willReturn(())
 
         let frame = try await ScreenSnapshot.captureWithGeometry(
@@ -71,7 +71,7 @@ struct ScreenSnapshotTests {
     @Test func `should still release the screen when encoding the capture fails`() async throws {
         let surface = try #require(makeSurface(width: 120, height: 60))
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in onFrame(surface) }
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in onFrame(surface) }
         given(screen).stop().willReturn(())
 
         await #expect(throws: ScreenSnapshot.Failure.encodeFailed) {
@@ -87,7 +87,7 @@ struct ScreenSnapshotTests {
     @Test func `should capture a frame as JPEG at the screen's own size`() async throws {
         let surface = try #require(makeSurface(width: 120, height: 60))
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in onFrame(surface) }
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in onFrame(surface) }
         given(screen).stop().willReturn(())
 
         let bytes = try await ScreenSnapshot.capture(screen: screen)
@@ -99,7 +99,7 @@ struct ScreenSnapshotTests {
     @Test func `should resize the captured frame when a size is requested`() async throws {
         let surface = try #require(makeSurface(width: 120, height: 60))
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in onFrame(surface) }
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in onFrame(surface) }
         given(screen).stop().willReturn(())
 
         let bytes = try await ScreenSnapshot.capture(
@@ -113,7 +113,7 @@ struct ScreenSnapshotTests {
     @Test func `should capture a real PNG when PNG is asked for`() async throws {
         let surface = try #require(makeSurface(width: 40, height: 20))
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willProduce { onFrame in onFrame(surface) }
+        given(screen).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in onFrame(surface) }
         given(screen).stop().willReturn(())
 
         let bytes = try await ScreenSnapshot.capture(screen: screen, format: .png)
@@ -123,7 +123,7 @@ struct ScreenSnapshotTests {
 
     @Test func `should time out and release the screen when it never delivers a frame`() async throws {
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willReturn(())
+        given(screen).start(onFrame: .any, onMetadata: .any).willReturn(())
         given(screen).stop().willReturn(())
 
         await #expect(throws: ScreenSnapshot.Failure.timeout) {
@@ -134,7 +134,7 @@ struct ScreenSnapshotTests {
 
     @Test func `should report the screen's own error and release it when it refuses to open`() async throws {
         let screen = MockScreen()
-        given(screen).start(onFrame: .any).willThrow(SnapshotTestError.notBooted)
+        given(screen).start(onFrame: .any, onMetadata: .any).willThrow(SnapshotTestError.notBooted)
         given(screen).stop().willReturn(())
 
         await #expect(throws: SnapshotTestError.notBooted) {

@@ -18,20 +18,20 @@ struct RenderedFoldableTests {
         let rendered = try #require(RenderedScreenTests.surface(width: 4, height: 3))
         var innerDelivery: (@Sendable (IOSurface) -> Void)?
         var coverDelivery: (@Sendable (IOSurface) -> Void)?
-        given(unfolded).start(onFrame: .any).willProduce { innerDelivery = $0 }
-        given(cover).start(onFrame: .any).willProduce { coverDelivery = $0 }
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in innerDelivery = onFrame }
+        given(cover).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in coverDelivery = onFrame }
         given(unfolded).stop().willReturn()
         given(cover).stop().willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 130))
-        given(hinge).watch(onAngle: .any).willReturn(watch)
+        given(hinge).watch(onAngle: .any, onEnd: .any).willReturn(watch)
         given(hinge).watchSweeps(onSweep: .any).willReturn(MockHingeWatch.unheard())
         given(watch).cancel().willReturn()
-        given(scene).update(hingeDegrees: .any).willReturn()
+        given(scene).update(hingeDegrees: .any, litPanel: .any).willReturn()
         let seen = LockedScreens()
         given(scene).render(screens: .any).willProduce { screens in
             seen.append(screens); return rendered
         }
-        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, scene: scene)
+        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, litPanel: { .secondary }, scene: scene)
         let delivered = LockedCount()
 
         try screen.start { _ in delivered.increment() }
@@ -58,15 +58,15 @@ struct RenderedFoldableTests {
         let rendered = try #require(RenderedScreenTests.surface(width: 4, height: 3))
         var innerDelivery: (@Sendable (IOSurface) -> Void)?
         var onAngle: ((HingeAngle) -> Void)?
-        given(unfolded).start(onFrame: .any).willProduce { innerDelivery = $0 }
-        given(cover).start(onFrame: .any).willReturn()
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in innerDelivery = onFrame }
+        given(cover).start(onFrame: .any, onMetadata: .any).willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 130))
-        given(hinge).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
+        given(hinge).watch(onAngle: .any, onEnd: .any).willProduce { cb, _ in onAngle = cb; return watch }
         given(hinge).watchSweeps(onSweep: .any).willReturn(MockHingeWatch.unheard())
-        given(scene).update(hingeDegrees: .any).willReturn()
+        given(scene).update(hingeDegrees: .any, litPanel: .any).willReturn()
         let renders = LockedCount()
         given(scene).render(screens: .any).willProduce { _ in renders.increment(); return rendered }
-        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, scene: scene)
+        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, litPanel: { .secondary }, scene: scene)
         try screen.start { _ in }
         innerDelivery?(inner)
         #expect(RenderedScreenTests.waitUntil { renders.value == 1 })
@@ -74,7 +74,7 @@ struct RenderedFoldableTests {
         onAngle?(HingeAngle(degrees: 120))
 
         #expect(RenderedScreenTests.waitUntil { renders.value == 2 })
-        verify(scene).update(hingeDegrees: .value(120)).called(1)
+        verify(scene).update(hingeDegrees: .value(120), litPanel: .value(.secondary)).called(1)
     }
 
     @Test func `should show the pose at the hinge's own angle`() throws {
@@ -82,13 +82,13 @@ struct RenderedFoldableTests {
         let hinge = MockHinge(), watch = MockHingeWatch()
         let scene = MockDeviceScene()
         var onAngle: ((HingeAngle) -> Void)?
-        given(unfolded).start(onFrame: .any).willReturn()
-        given(cover).start(onFrame: .any).willReturn()
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willReturn()
+        given(cover).start(onFrame: .any, onMetadata: .any).willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 130))
-        given(hinge).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
+        given(hinge).watch(onAngle: .any, onEnd: .any).willProduce { cb, _ in onAngle = cb; return watch }
         given(hinge).watchSweeps(onSweep: .any).willReturn(MockHingeWatch.unheard())
-        given(scene).update(hingeDegrees: .any).willReturn()
-        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, scene: scene)
+        given(scene).update(hingeDegrees: .any, litPanel: .any).willReturn()
+        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, litPanel: { .secondary }, scene: scene)
         try screen.start { _ in }
         #expect(screen.pose == FoldablePose(hingeDegrees: 130))
         onAngle?(HingeAngle(degrees: 42))
@@ -100,15 +100,15 @@ struct RenderedFoldableTests {
         let hinge = MockHinge(), watch = MockHingeWatch()
         let scene = MockDeviceScene()
         var onAngle: ((HingeAngle) -> Void)?
-        given(unfolded).start(onFrame: .any).willReturn()
-        given(cover).start(onFrame: .any).willReturn()
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willReturn()
+        given(cover).start(onFrame: .any, onMetadata: .any).willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 130))
-        given(hinge).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
+        given(hinge).watch(onAngle: .any, onEnd: .any).willProduce { cb, _ in onAngle = cb; return watch }
         given(hinge).watchSweeps(onSweep: .any).willReturn(MockHingeWatch.unheard())
-        given(scene).update(hingeDegrees: .any).willReturn()
+        given(scene).update(hingeDegrees: .any, litPanel: .any).willReturn()
         let heard = LockedPoses()
         let screen = RenderedFoldable(
-            unfolded: unfolded, cover: cover, hinge: hinge, scene: scene,
+            unfolded: unfolded, cover: cover, hinge: hinge, litPanel: { .secondary }, scene: scene,
             onPose: { heard.append($0) })
         try screen.start { _ in }
 
@@ -124,12 +124,12 @@ struct RenderedFoldableTests {
         let unfolded = MockScreen(), cover = MockScreen()
         let hinge = MockHinge(), watch = MockHingeWatch()
         var onAngle: ((HingeAngle) -> Void)?
-        given(unfolded).start(onFrame: .any).willReturn()
-        given(cover).start(onFrame: .any).willReturn()
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willReturn()
+        given(cover).start(onFrame: .any, onMetadata: .any).willReturn()
         given(unfolded).stop().willReturn()
         given(cover).stop().willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 130))
-        given(hinge).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
+        given(hinge).watch(onAngle: .any, onEnd: .any).willProduce { cb, _ in onAngle = cb; return watch }
         given(hinge).watchSweeps(onSweep: .any).willReturn(MockHingeWatch.unheard())
         given(watch).cancel().willReturn()
         weak var leftBook: RenderedFoldable?
@@ -137,9 +137,9 @@ struct RenderedFoldableTests {
         let heard = LockedPoses()
         do {
             let scene = MockDeviceScene()
-            given(scene).update(hingeDegrees: .any).willReturn()
+            given(scene).update(hingeDegrees: .any, litPanel: .any).willReturn()
             let book = RenderedFoldable(
-                unfolded: unfolded, cover: cover, hinge: hinge, scene: scene,
+                unfolded: unfolded, cover: cover, hinge: hinge, litPanel: { .secondary }, scene: scene,
                 onPose: { [scene] pose in _ = scene; heard.append(pose) })
             leftBook = book
             leftScene = scene
@@ -164,15 +164,15 @@ struct RenderedFoldableTests {
         let rendered = try #require(RenderedScreenTests.surface(width: 4, height: 3))
         var innerDelivery: (@Sendable (IOSurface) -> Void)?
         var onAngle: ((HingeAngle) -> Void)?
-        given(unfolded).start(onFrame: .any).willProduce { innerDelivery = $0 }
-        given(cover).start(onFrame: .any).willReturn()
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in innerDelivery = onFrame }
+        given(cover).start(onFrame: .any, onMetadata: .any).willReturn()
         given(hinge).angle().willReturn(HingeAngle(degrees: 0))
-        given(hinge).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
+        given(hinge).watch(onAngle: .any, onEnd: .any).willProduce { cb, _ in onAngle = cb; return watch }
         given(hinge).watchSweeps(onSweep: .any).willReturn(MockHingeWatch.unheard())
         let order = LockedLog()
-        given(scene).update(hingeDegrees: .any).willProduce { order.append("pose \($0)") }
+        given(scene).update(hingeDegrees: .any, litPanel: .any).willProduce { degrees, _ in order.append("pose \(degrees)") }
         given(scene).render(screens: .any).willProduce { _ in order.append("render"); return rendered }
-        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, scene: scene)
+        let screen = RenderedFoldable(unfolded: unfolded, cover: cover, hinge: hinge, litPanel: { .secondary }, scene: scene)
 
         try screen.start { _ in }
         innerDelivery?(inner)
@@ -184,17 +184,17 @@ struct RenderedFoldableTests {
         // speaks: a blank stage helps nobody.
         let mute = MockHinge()
         given(mute).angle().willReturn(nil)
-        given(mute).watch(onAngle: .any).willProduce { onAngle = $0; return watch }
+        given(mute).watch(onAngle: .any, onEnd: .any).willProduce { cb, _ in onAngle = cb; return watch }
         given(mute).watchSweeps(onSweep: .any).willReturn(MockHingeWatch.unheard())
         let late = LockedLog()
         let scene2 = MockDeviceScene()
-        given(scene2).update(hingeDegrees: .any).willProduce { late.append("pose \($0)") }
+        given(scene2).update(hingeDegrees: .any, litPanel: .any).willProduce { degrees, _ in late.append("pose \(degrees)") }
         given(scene2).render(screens: .any).willProduce { _ in late.append("render"); return rendered }
         let unfolded2 = MockScreen(), cover2 = MockScreen()
         var delivery2: (@Sendable (IOSurface) -> Void)?
-        given(unfolded2).start(onFrame: .any).willProduce { delivery2 = $0 }
-        given(cover2).start(onFrame: .any).willReturn()
-        let waiting = RenderedFoldable(unfolded: unfolded2, cover: cover2, hinge: mute, scene: scene2)
+        given(unfolded2).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in delivery2 = onFrame }
+        given(cover2).start(onFrame: .any, onMetadata: .any).willReturn()
+        let waiting = RenderedFoldable(unfolded: unfolded2, cover: cover2, hinge: mute, litPanel: { .primary }, scene: scene2)
         try waiting.start { _ in }
         delivery2?(inner)
         #expect(RenderedScreenTests.waitUntil { late.value == ["pose 0.0", "render"] })
@@ -213,7 +213,7 @@ struct RenderedFoldableTests {
         var onAngle: ((HingeAngle) -> Void)?
         var onSweep: ((HingeSweepEvent) -> Void)?
         lazy var screen = RenderedFoldable(
-            unfolded: Self.dark(), cover: Self.dark(), hinge: hinge, scene: scene,
+            unfolded: Self.dark(), cover: Self.dark(), hinge: hinge, litPanel: { .secondary }, scene: scene,
             onPose: { [heard] in heard.append($0) }, now: { [clock] in clock.now })
 
         /// The book's time, moved by hand so a sweep's frames do not
@@ -227,16 +227,16 @@ struct RenderedFoldableTests {
 
         init(standing: Double) {
             given(hinge).angle().willReturn(HingeAngle(degrees: standing))
-            given(hinge).watch(onAngle: .any).willProduce { [unowned self] in self.onAngle = $0; return self.watch }
+            given(hinge).watch(onAngle: .any, onEnd: .any).willProduce { [unowned self] cb, _ in self.onAngle = cb; return self.watch }
             given(hinge).watchSweeps(onSweep: .any).willProduce { [unowned self] in self.onSweep = $0; return self.sweeps }
             given(watch).cancel().willReturn()
             given(sweeps).cancel().willReturn()
-            given(scene).update(hingeDegrees: .any).willProduce { [posed] in posed.append($0) }
+            given(scene).update(hingeDegrees: .any, litPanel: .any).willProduce { [posed] degrees, _ in posed.append(degrees) }
         }
 
         private static func dark() -> MockScreen {
             let screen = MockScreen()
-            given(screen).start(onFrame: .any).willReturn()
+            given(screen).start(onFrame: .any, onMetadata: .any).willReturn()
             given(screen).stop().willReturn()
             return screen
         }
@@ -307,6 +307,46 @@ struct RenderedFoldableTests {
         #expect(book.posed.degrees.last == sweep.degrees(after: 0))
         verify(book.sweeps).cancel().called(1)
     }
+
+    /// The lit panel is Core Device's word, handed to the scene with the
+    /// angle — never derived from it. When it changes without the hinge
+    /// moving (the pose provider settling late, an app claiming the
+    /// cover), the book is re-posed before the next frame is composed.
+    @Test func `the lit panel is what the source says, and a change re-poses before the next frame`() throws {
+        let unfolded = MockScreen(), cover = MockScreen()
+        let hinge = MockHinge(), watch = MockHingeWatch()
+        let scene = MockDeviceScene()
+        let inner = try #require(RenderedScreenTests.surface(width: 2, height: 2))
+        let rendered = try #require(RenderedScreenTests.surface(width: 4, height: 3))
+        var innerDelivery: (@Sendable (IOSurface) -> Void)?
+        given(unfolded).start(onFrame: .any, onMetadata: .any).willProduce { onFrame, _ in innerDelivery = onFrame }
+        given(cover).start(onFrame: .any, onMetadata: .any).willReturn()
+        // 30° on the way shut: the unfolded panel is still lit.
+        given(hinge).angle().willReturn(HingeAngle(degrees: 30))
+        given(hinge).watch(onAngle: .any, onEnd: .any).willReturn(watch)
+        given(hinge).watchSweeps(onSweep: .any).willReturn(MockHingeWatch.unheard())
+        let lit = LockedPanel(.secondary)
+        let order = LockedLog()
+        given(scene).update(hingeDegrees: .any, litPanel: .any).willProduce { degrees, panel in
+            order.append("pose \(degrees) \(panel)")
+        }
+        given(scene).render(screens: .any).willProduce { _ in order.append("render"); return rendered }
+        let poses = LockedCount()
+        let screen = RenderedFoldable(
+            unfolded: unfolded, cover: cover, hinge: hinge, litPanel: { lit.value }, scene: scene,
+            onPose: { _ in poses.increment() }
+        )
+        try screen.start { _ in }
+        innerDelivery?(inner)
+        #expect(RenderedScreenTests.waitUntil { order.value == ["pose 30.0 secondary", "render"] })
+
+        // SpringBoard hands over to the cover a moment later, hinge still.
+        lit.value = .primary
+        innerDelivery?(inner)
+        #expect(RenderedScreenTests.waitUntil { order.value.count == 4 })
+        #expect(order.value == ["pose 30.0 secondary", "render", "pose 30.0 primary", "render"])
+        #expect(poses.value == 1)
+    }
 }
 
 extension MockHingeWatch {
@@ -323,6 +363,16 @@ final class LockedDegrees: @unchecked Sendable {
     private var storage: [Double] = []
     var degrees: [Double] { lock.withLock { storage } }
     func append(_ degrees: Double) { lock.withLock { storage.append(degrees) } }
+}
+
+private final class LockedPanel: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: IntegratedPanel
+    init(_ panel: IntegratedPanel) { storage = panel }
+    var value: IntegratedPanel {
+        get { lock.withLock { storage } }
+        set { lock.withLock { storage = newValue } }
+    }
 }
 
 private final class LockedScreens: @unchecked Sendable {

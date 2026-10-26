@@ -24,6 +24,62 @@ struct SimulatorKitScreenOrientationTests {
         }
     }
 
+    @Test func `a device that never rotates reads its unset orientation as the unturned panel`() throws {
+        #expect(try SimulatorKitScreenOrientation.read(properties: ScreenProperties(0), rotates: false) == .portrait)
+    }
+
+    @Test func `should take another authority's reading when the guest has published none`() throws {
+        #expect(
+            try SimulatorKitScreenOrientation.read(properties: ScreenProperties(0), unreported: { .landscapeLeft })
+                == .landscapeLeft)
+        #expect(throws: SimulatorKitScreenOrientation.Failure.unknown(0)) {
+            try SimulatorKitScreenOrientation.read(properties: ScreenProperties(0), unreported: { nil })
+        }
+    }
+
+    @Test func `should not ask another authority when the guest has published one`() throws {
+        var asked = false
+        let orientation = try SimulatorKitScreenOrientation.read(properties: ScreenProperties(3)) {
+            asked = true
+            return .portrait
+        }
+        #expect(orientation == .landscapeLeft)
+        #expect(!asked)
+    }
+
+    @Test func `should read Core Device's orientation of the display asked for`() {
+        let json = Data(#"""
+            {"result":{"displays":[
+              {"displayId":1,"currentOrientation":"rot0","nativeSize":[1398,2034]},
+              {"displayId":3,"currentOrientation":"rot90","nativeSize":[2007,2853]}]}}
+            """#.utf8)
+        #expect(ActiveDisplayReport.orientation(of: 1, in: json) == .portrait)
+        #expect(ActiveDisplayReport.orientation(of: 3, in: json) == .landscapeLeft)
+        #expect(ActiveDisplayReport.orientation(of: 7, in: json) == nil)
+        #expect(ActiveDisplayReport.orientation(of: 1, in: Data("{}".utf8)) == nil)
+    }
+
+    @Test(arguments: [UInt32(5), .max])
+    func `a device that never rotates still fails on an out-of-range orientation`(raw: UInt32) {
+        #expect(throws: SimulatorKitScreenOrientation.Failure.unknown(raw)) {
+            try SimulatorKitScreenOrientation.read(properties: ScreenProperties(raw), rotates: false)
+        }
+    }
+
+    @Test(arguments: [
+        ("iPhone", true), ("iPad", true),
+        ("Apple Watch", false), ("Apple TV", false), ("Apple Vision", false),
+    ])
+    func `only iPhone and iPad rotate`(family: String, rotates: Bool) {
+        #expect(SimulatorKitScreenOrientation.rotates(productFamily: family) == rotates)
+    }
+
+    @Test func `an unset orientation explains itself instead of naming the enum case`() {
+        let message = SimulatorKitScreenOrientation.Failure.unknown(0).localizedDescription
+        #expect(message.contains("has not reported its interface orientation"))
+        #expect(!message.contains("unknown(0)"))
+    }
+
     @Test func `should fail when the screen properties are missing`() {
         #expect(throws: SimulatorKitScreenOrientation.Failure.unavailable) {
             try SimulatorKitScreenOrientation.read(properties: NSObject())

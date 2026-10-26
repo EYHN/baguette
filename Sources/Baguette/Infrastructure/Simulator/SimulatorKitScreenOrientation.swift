@@ -5,14 +5,56 @@ import ObjectiveC
 /// device rotations. `simctl io enumerate` omits it on older Xcodes.
 enum SimulatorKitScreenOrientation {
     static func read(device: NSObject, screenID: UInt32) throws -> DeviceOrientation {
-        try read(properties: properties(device: device, screenID: screenID))
+        try read(
+            properties: properties(device: device, screenID: screenID), rotates: rotates(device),
+            unreported: coreDevice(device, screenID))
     }
 
     static func readScreen(device: NSObject, screenID: UInt32, panel: IntegratedPanel?) throws -> AXScreen {
-        try readScreen(properties: properties(device: device, screenID: screenID), panel: panel)
+        try readScreen(
+            properties: properties(device: device, screenID: screenID), panel: panel, rotates: rotates(device),
+            unreported: coreDevice(device, screenID))
+    }
+
+    /// Core Device's reading of the same display, for a guest SimulatorKit
+    /// has none for. Some booted devices never publish one to SimulatorKit
+    /// (a local iPhone 17 Pro on iOS 27.0, for whole sessions and across
+    /// reboots), and every accessibility read on them used to fail while
+    /// the screen itself was fine.
+    private static func coreDevice(_ device: NSObject, _ screenID: UInt32) -> () -> DeviceOrientation? {
+        {
+            guard let udid = (device.value(forKey: "UDID") as? NSUUID)?.uuidString else { return nil }
+            return ActiveDisplays.coreDeviceOrientation(udid: udid, screenID: screenID)
+        }
+    }
+
+    /// Whether the device's interface can turn on its panel. Only iPhone
+    /// and iPad rotate; an Apple Watch (and Apple TV, Vision) never
+    /// reports an interface orientation — SimulatorKit leaves it 0 for
+    /// the device's whole life — and its panel is always presented
+    /// unturned. An unreadable family counts as rotating, so the
+    /// orientation stays required.
+    static func rotates(_ device: NSObject) -> Bool {
+        guard let type = device.value(forKey: "deviceType") as? NSObject,
+            let family = type.value(forKey: "productFamily") as? String
+        else { return true }
+        return rotates(productFamily: family)
+    }
+
+    static func rotates(productFamily: String) -> Bool {
+        productFamily == "iPhone" || productFamily == "iPad"
     }
 
     private static func properties(device: NSObject, screenID: UInt32) throws -> NSObject {
+        // The framebuffer port's own snapshot first: it is safe off the
+        // main thread, which `SimDeviceScreen` is not in a library host.
+        if let properties = SimulatorKitFramebufferPorts.screenProperties(device: device, screenID: screenID) {
+            return properties
+        }
+        return try screenProperties(device: device, screenID: screenID)
+    }
+
+    private static func screenProperties(device: NSObject, screenID: UInt32) throws -> NSObject {
         let allocSelector = NSSelectorFromString("alloc")
         let initSelector = NSSelectorFromString("initWithDevice:screenID:")
         guard let cls = NSClassFromString("SimulatorKit.SimDeviceScreen"),
@@ -37,7 +79,10 @@ enum SimulatorKitScreenOrientation {
     }
 
     /// Each property comes from this fresh immutable screenProperties snapshot.
-    static func readScreen(properties: NSObject, panel: IntegratedPanel?) throws -> AXScreen {
+    static func readScreen(
+        properties: NSObject, panel: IntegratedPanel?, rotates: Bool = true,
+        unreported: () -> DeviceOrientation? = { nil }
+    ) throws -> AXScreen {
         let sizeSelector = NSSelectorFromString("pixelSize")
         let idSelector = NSSelectorFromString("screenID")
         let scaleSelector = NSSelectorFromString("preferredUIScale")
@@ -59,13 +104,20 @@ enum SimulatorKitScreenOrientation {
         else { throw Failure.unavailable }
         return AXScreen(
             width: size.width / scale, height: size.height / scale,
-            orientation: try read(properties: properties),
+            orientation: try read(properties: properties, rotates: rotates, unreported: unreported),
             target: ScreenTarget(
                 screenId: id, litPanel: panel,
                 pixelSize: Size(width: size.width, height: size.height)))
     }
 
-    static func read(properties: NSObject) throws -> DeviceOrientation {
+    /// `rotates` is false for a device whose interface never turns: its
+    /// unset orientation (0) is the unturned panel, not an unknown one.
+    /// `unreported` is asked when a device that turns has none set: another
+    /// authority's reading, or nil to fail as unknown.
+    static func read(
+        properties: NSObject, rotates: Bool = true,
+        unreported: () -> DeviceOrientation? = { nil }
+    ) throws -> DeviceOrientation {
         let selector = NSSelectorFromString("uiOrientation")
         guard properties.responds(to: selector), let method = properties.method(for: selector) else {
             throw Failure.unavailable
@@ -79,6 +131,10 @@ enum SimulatorKitScreenOrientation {
         case 2: return .portraitUpsideDown
         case 3: return .landscapeLeft
         case 4: return .landscapeRight
+        case 0 where !rotates: return .portrait
+        case 0:
+            if let other = unreported() { return other }
+            throw Failure.unknown(raw)
         default: throw Failure.unknown(raw)
         }
     }
@@ -100,6 +156,12 @@ enum SimulatorKitScreenOrientation {
             case .unavailable:
                 return
                     "SimulatorKit cannot report the screen's interface orientation; coordinate conversion is unavailable."
+            case .unknown(0):
+                // The guest has not published its interface orientation:
+                // it is still booting, or its display service is not up.
+                return
+                    "The simulator has not reported its interface orientation yet, so on-screen positions are unknown. "
+                    + "Wait for it to finish booting and retry; if this persists, reboot the simulator."
             case .unknown(let raw):
                 return
                     "SimulatorKit reported unknown interface orientation \(raw); coordinate conversion is unavailable."

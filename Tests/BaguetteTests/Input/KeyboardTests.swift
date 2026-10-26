@@ -219,6 +219,8 @@ struct TypeTextGestureTests {
         let keyA = KeyboardKey.from(wireCode: "KeyA")!
         _ = TypeText(text: "Aa").execute(on: input)
 
+        // Text is a stream: each key gets a 5 ms hold, not the 100 ms a
+        // single `key` gesture defaults to.
         verify(input).key(
             .value(keyA), modifiers: .value([.shift]), duration: .any
         ).called(1)

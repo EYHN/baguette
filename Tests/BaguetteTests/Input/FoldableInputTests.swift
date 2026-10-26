@@ -14,12 +14,12 @@ struct FoldableInputTests {
         var keys: [(HIDUsage, [HIDUsage], TimeInterval)] = []
     }
 
-    private func make(refusing: Bool = false) -> (FoldableInput, MockInput, Presses) {
+    private func make(refusing: Bool = false, failure: HingeError = .toolMissing) -> (FoldableInput, MockInput, Presses) {
         let touches = MockInput()
         let keys = MockDeviceKeys()
         let presses = Presses()
         given(keys).press(.any, holding: .any, hold: .any).willProduce { usage, modifiers, hold in
-            if refusing { throw HingeError.toolMissing }
+            if refusing { throw failure }
             presses.keys.append((usage, modifiers, hold))
         }
         return (FoldableInput(touches: touches, keys: keys), touches, presses)
@@ -51,9 +51,21 @@ struct FoldableInputTests {
         verify(touches).button(.value(.home), duration: .value(0)).called(1)
     }
 
-    @Test func `should fail a press when the guest refuses the key`() {
-        let (input, _, _) = make(refusing: true)
-        #expect(input.button(.volumeUp, duration: 0) == false)
+    @Test func `a keystroke the guest has no tool for falls back to the host's own keyboard`() {
+        let (input, touches, _) = make(refusing: true)
+        given(touches).key(.any, modifiers: .any, duration: .any).willReturn(true)
+        let a = KeyboardKey.from(wireCode: "KeyA")!
+        #expect(input.key(a, modifiers: [.shift], duration: 0) == true)
+        verify(touches).key(.value(a), modifiers: .value([.shift]), duration: .value(0)).called(1)
+    }
+
+    @Test func `a key the guest has no tool for falls back to the host's own press`() {
+        // A build without `HingeControl` — a host embedding the library
+        // without its resource bundle — still has the legacy button path.
+        let (input, touches, _) = make(refusing: true)
+        given(touches).button(.any, duration: .any).willReturn(true)
+        #expect(input.button(.volumeUp, duration: 0) == true)
+        verify(touches).button(.value(.volumeUp), duration: .value(0)).called(1)
     }
 
     @Test func `should type a key on a foldable through the guest with its modifiers held`() {
@@ -72,7 +84,7 @@ struct FoldableInputTests {
     }
 
     @Test func `should fail a keystroke when the guest refuses the key`() {
-        let (input, _, _) = make(refusing: true)
+        let (input, _, _) = make(refusing: true, failure: .toolFailed(status: 1))
         #expect(input.key(KeyboardKey.from(wireCode: "KeyA")!, modifiers: [], duration: 0) == false)
     }
 }
